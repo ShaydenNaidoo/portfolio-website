@@ -66,7 +66,7 @@
     }
         /* Username and handle */
         .profile-info {
-      margin-top: 130px;
+      margin-top: 180px;
       text-align: left;
       padding: 20px;
     }
@@ -130,10 +130,24 @@
         </section>
     </main>
     <footer>
-        <button id="themeToggle">Toggle Dark/Light Mode</button>
-
-
+        <p>&copy; 2025 Shayden Naidoo. All rights reserved.</p>
+        <button id="themeToggle" class="light-switch"></button>
     </footer>
+    <div id="project-modal" class="modal">
+        <div class="modal-content">
+          <span class="close">&times;</span>
+          <div class="modal-body">
+            <img id="modal-image" src="" alt="Project Image">
+            <div class="modal-info">
+              <h3 id="modal-title"></h3>
+              <p id="modal-description"></p>
+              <p id="modal-date"></p>
+              <p id="modal-company"></p>
+              <a id="modal-repo" href="" target="_blank">View on GitHub</a>
+            </div>
+          </div>
+        </div>
+      </div>
 
 <script src="./js/home.js"></script>
 </body>

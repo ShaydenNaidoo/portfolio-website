@@ -126,3 +126,145 @@ footer p {
     font-size: 0.9em;
     color: #888888;
 }
+#project-cards-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
+  }
+  
+  .project-card {
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    width: 300px;
+    overflow: hidden;
+    transition: transform 0.2s;
+    cursor: pointer;
+  }
+  
+  .project-card:hover {
+    transform: scale(1.05);
+  }
+  
+  .project-card img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+  }
+  
+  .project-card .card-content {
+    padding: 15px;
+  }
+  
+  .project-card h3 {
+    margin: 0 0 10px;
+    font-size: 20px;
+  }
+  
+  .project-card p {
+    margin: 0 0 15px;
+    color: #666;
+  }
+  
+  .project-card a {
+    color: #007bff;
+    text-decoration: none;
+  }
+  
+  .project-card a:hover {
+    text-decoration: underline;
+  }
+  
+  /* Modal styles */
+  .modal {
+    display: none;
+    position: fixed;
+    z-index: 1;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.5);
+  }
+  
+  .modal-content {
+    background-color: #fff;
+    margin: 10% auto;
+    padding: 20px;
+    border: 1px solid #888;
+    width: 80%;
+    max-width: 800px;
+    display: flex;
+    flex-direction: row;
+  }
+  
+  .modal-body {
+    display: flex;
+    flex-direction: row;
+  }
+  
+  .modal-body img {
+    width: 50%;
+    height: auto;
+    object-fit: cover;
+  }
+  
+  .modal-info {
+    padding: 20px;
+    width: 50%;
+  }
+  
+  .modal-info h3 {
+    margin-top: 0;
+  }
+  
+  .close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+  }
+  
+  .close:hover,
+  .close:focus {
+    color: black;
+    text-decoration: none;
+    cursor: pointer;
+  }
+/* Light switch button styles */
+.light-switch {
+    position: absolute;
+    bottom: 10px;
+    right: 500px;
+    width: 50px;
+    height: 25px;
+    background-color: #ccc;
+    border-radius: 25px;
+    border: none;
+    cursor: pointer;
+    position: relative;
+    transition: background-color 0.3s;
+  }
+  
+  .light-switch::before {
+    content: '';
+    position: absolute;
+    top: 2.5px;
+    left: 2.5px;
+    width: 20px;
+    height: 20px;
+    background-color: #fff;
+    border-radius: 50%;
+    transition: transform 0.3s;
+  }
+  
+  body.dark-mode .light-switch {
+    background-color: #333;
+  }
+  
+  body.dark-mode .light-switch::before {
+    transform: translateX(25px);
+  }
