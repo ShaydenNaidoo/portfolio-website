@@ -66,7 +66,55 @@ section h2 {
     border-bottom: 2px solid #333333;
     padding-bottom: 10px;
 }
-
+#project-cards-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
+  }
+  
+  .project-card {
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    width: 300px;
+    overflow: hidden;
+    transition: transform 0.2s;
+  }
+  
+  .project-card:hover {
+    transform: scale(1.05);
+  }
+  
+  .project-card img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+  }
+  
+  .project-card .card-content {
+    padding: 15px;
+  }
+  
+  .project-card h3 {
+    margin: 0 0 10px;
+    font-size: 20px;
+  }
+  
+  .project-card p {
+    margin: 0 0 15px;
+    color: #666;
+  }
+  
+  .project-card a {
+    color: #007bff;
+    text-decoration: none;
+  }
+  
+  .project-card a:hover {
+    text-decoration: underline;
+  }
 footer {
     background-color: #000000;
     padding: 20px;
