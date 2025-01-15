@@ -1,0 +1,80 @@
+/* Reset some default browser styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background-color: #1a1a1a;
+    color: #ffffff;
+    line-height: 1.6;
+}
+
+header {
+    background-color: #000000;
+    padding: 20px;
+    text-align: center;
+    border-bottom: 1px solid #333333;
+}
+
+header h1 {
+    font-size: 2.5em;
+    font-weight: 700;
+}
+
+.banner {
+    width: 100%;
+    height: 33vh; /* One-third of the viewport height */
+    background-image: url('path-to-your-banner-image.jpg'); /* Replace with your image URL */
+    background-size: cover;
+    background-position: center;
+    border-bottom: 1px solid #333333;
+}
+
+nav {
+    margin: 20px 0;
+    text-align: center;
+}
+
+nav a {
+    color: #ffffff;
+    text-decoration: none;
+    margin: 0 15px;
+    font-size: 1.1em;
+    transition: color 0.3s;
+}
+
+nav a:hover {
+    color: #1db954;
+}
+
+main {
+    padding: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+section {
+    margin-bottom: 40px;
+}
+
+section h2 {
+    font-size: 2em;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #333333;
+    padding-bottom: 10px;
+}
+
+footer {
+    background-color: #000000;
+    padding: 20px;
+    text-align: center;
+    border-top: 1px solid #333333;
+}
+
+footer p {
+    font-size: 0.9em;
+    color: #888888;
+}
