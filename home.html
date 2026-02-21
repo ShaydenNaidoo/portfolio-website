@@ -1,154 +1,128 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Portfolio Website</title>
-    <link rel="stylesheet" href="./css/home.css">
-    <style>
-     :root {
-      --bg-color: #f5f5f5;
-      --text-color: #333;
-      --profile-info-color: #555;
-      --section-h2-color: #333;
-      --section-p-color: #666;
-      --footer-bg-color: #333;
-      --footer-text-color: #fff;
-    }
-    body {
-      margin: 0;
-      background-color: var(--bg-color);
-      color: var(--text-color);
-      font-family: Arial, sans-serif;
-    }
-    .dark-mode {
-      --bg-color: #333;
-      --text-color: #f5f5f5;
-      --profile-info-color: #ccc;
-      --section-h2-color: #f5f5f5;
-      --section-p-color: #ddd;
-      --footer-bg-color: #111;
-      --footer-text-color: #f5f5f5;
-    }
-        /* Banner image styling */
-        header {
-            position: relative;
-            text-align: center;
-        }
-
-        header img.cover-photo {
-            width: 100%;
-            height: 50vh;
-            object-fit: cover;
-        }
-
-        /* Profile photo styling */
-        .profile-photo {
-            position: absolute;
-            bottom: -90px; /* Overlap the banner */
-            left: 5%;
-            transform: translateX(-50%);
-            width: 220px;
-            height: 220px;
-            border-radius: 50%;
-            border: 5px solid #fff;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
-            float:left;
-        }
-
-  @media (max-width: 768px) {
-        .profile-photo {
-            position: static;
-            transform: none;
-            margin: 0 auto;
-            display: block;
-        }
-    }
-        /* Username and handle */
-        .profile-info {
-      margin-top: 120px;
-      text-align: left;
-      padding: 20px;
-    }
-    .profile-info h1 {
-      font-size: 24px;
-      margin: 10px 0;
-    }
-    .profile-info p {
-      font-size: 16px;
-      color: var(--profile-info-color);
-      margin: 0;
-    }
-    main {
-      padding: 20px;
-    }
-    section {
-      margin-bottom: 30px;
-    }
-    section h2 {
-      font-size: 30px;
-      color: var(--section-h2-color);
-      margin-bottom: 10px;
-    }
-    section p {
-      font-size: 19px;
-      color: var(--section-p-color);
-    }
-    footer {
-      text-align: center;
-      padding: 10px 0;
-      background-color: var(--footer-bg-color);
-      color: var(--footer-text-color);
-    }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shayden Naidoo | Portfolio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Arsenal:wght@400;700&family=Noto+Sans:wght@400;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./css/home.css">
 </head>
 <body>
-    <header>
-        <img src="./img/cover-photo.jpg" alt="Cover Photo" class="cover-photo">
-        <img src="./img/profile-photo.jpeg" alt="Profile Photo" class="profile-photo">
-    </header>
-    <div class="profile-info">
-        <h1>Shayden Naidoo</h1>
-        <p><a href="https://github.com/ShaydenNaidoo">@ShaydenNaidoo</a></p>
-    </div>
-    <main>
-        <section id="about">
-            <h2>About Me</h2>
-            <p>a young passionate computer science student who is looking to learn and innovate the field of computer science.<br>
-            Currently in my 3rd year of studies at the University of Pretoria and looking to make a difference in the world. <br>
-            Interested in software development, CyberSecurity, Reverse Engineering, machine learning, and artificial intelligence.</p>
+  <div class="backdrop-pattern" aria-hidden="true"></div>
 
-        </section>
-        <section id="projects">
-            <h2>Projects</h2>
-            <p>my university and personal projects</p>
-            <div id="project-cards-container"></div>
-        </section>
-        <section id="contact">
-            <h2>Contact</h2>
-            <p>Provide your contact information here.</p>
-        </section>
-    </main>
-    <footer>
-        <p>&copy; 2025 Shayden Naidoo. All rights reserved.</p>
-        <button id="themeToggle" class="light-switch"></button>
-    </footer>
-    <div id="project-modal" class="modal">
-        <div class="modal-content">
-          <span class="close">&times;</span>
-          <div class="modal-body">
-            <img id="modal-image" src="" alt="Project Image">
-            <div class="modal-info">
-              <h3 id="modal-title"></h3>
-              <p id="modal-description"></p>
-              <p id="modal-date"></p>
-              <p id="modal-company"></p>
-              <a id="modal-repo" href="" target="_blank">View on GitHub</a>
-            </div>
-          </div>
-        </div>
+  <header class="hero" id="top">
+    <div class="hero-banner">
+      <img src="./img/cover-photo.jpg" alt="Cover photo" class="cover-photo">
+      <div class="hero-scrim"></div>
+      <div class="hero-cutout"></div>
+    </div>
+    <div class="hero-content shell">
+      <img src="./img/profile-photo.jpeg" alt="Shayden Naidoo" class="profile-photo">
+      <div class="profile-block">
+        <p class="label-chip">Phantom Profile</p>
+        <h1>Shayden Naidoo</h1>
+        <p class="handle"><a href="https://github.com/ShaydenNaidoo" target="_blank" rel="noreferrer">@ShaydenNaidoo</a></p>
+        <p class="headline">Computer Science Student | Software & Cybersecurity Builder</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="panel about-panel" id="about">
+      <div class="panel-title-wrap">
+        <h2 class="panel-title">About</h2>
+      </div>
+      <p>
+        Young, passionate computer science student focused on building useful software and security-first systems.
+        Currently in 3rd year at the University of Pretoria, with strong interest in software engineering,
+        cybersecurity, reverse engineering, machine learning, and AI.
+      </p>
+    </section>
+
+    <section class="panel projects-panel" id="projects">
+      <div class="panel-title-wrap">
+        <h2 class="panel-title">Missions</h2>
+      </div>
+      <p class="section-lead">Hover or select a project card to inspect the mission details.</p>
+
+      <div class="carousel-wrap">
+        <button class="carousel-control" id="carousel-prev" aria-label="Previous project">&#10094;</button>
+        <div class="projects-carousel" id="projects-carousel" role="listbox" aria-label="Project list"></div>
+        <button class="carousel-control" id="carousel-next" aria-label="Next project">&#10095;</button>
       </div>
 
-<script src="./js/home.js"></script>
+      <article class="project-focus" id="project-focus" aria-live="polite">
+        <div class="project-focus-image-frame">
+          <img id="focus-image" src="./img/projects/profile-photo.jpeg" alt="Selected project image">
+        </div>
+        <div class="project-focus-info">
+          <p class="label-chip">Selected Mission</p>
+          <h3 id="focus-title">Loading projects...</h3>
+          <p id="focus-description">Please wait while project data loads.</p>
+          <div class="meta-row">
+            <span id="focus-language">Language: N/A</span>
+            <span id="focus-updated">Updated: N/A</span>
+          </div>
+          <a id="focus-link" href="#" target="_blank" rel="noreferrer">Open Repository</a>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel thm-panel" id="tryhackme">
+      <div class="panel-title-wrap">
+        <h2 class="panel-title">TryHackMe Intel</h2>
+      </div>
+      <p class="section-lead">Live stats sync from your TryHackMe profile on each page load.</p>
+
+      <div class="thm-grid">
+        <div class="thm-star-card">
+          <svg id="thm-star-svg" viewBox="0 0 400 400" aria-label="TryHackMe skills star chart"></svg>
+          <p class="thm-sync" id="thm-sync">Syncing...</p>
+        </div>
+
+        <div class="thm-summary-card">
+          <div class="summary-stat">
+            <p class="stat-label">Global Rank</p>
+            <p class="stat-value" id="thm-rank">--</p>
+          </div>
+          <div class="summary-stat">
+            <p class="stat-label">Rooms Completed</p>
+            <p class="stat-value" id="thm-rooms">--</p>
+          </div>
+          <div class="summary-stat">
+            <p class="stat-label">Skills Tracked</p>
+            <p class="stat-value" id="thm-skill-count">--</p>
+          </div>
+        </div>
+
+        <div class="thm-skills-card">
+          <h3>Skills Matrix</h3>
+          <div id="thm-skills-list" class="skill-list"></div>
+        </div>
+
+        <div class="thm-rooms-card">
+          <h3>Completed Rooms</h3>
+          <ul id="thm-rooms-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel contact-panel" id="contact">
+      <div class="panel-title-wrap">
+        <h2 class="panel-title">Contact</h2>
+      </div>
+      <p>Reach out through GitHub for collaboration opportunities and project discussions.</p>
+      <a class="contact-link" href="https://github.com/ShaydenNaidoo" target="_blank" rel="noreferrer">github.com/ShaydenNaidoo</a>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>&copy; 2026 Shayden Naidoo. All rights reserved.</p>
+    <p class="font-credit">Font attribution: <a href="http://www.onlinewebfonts.com" target="_blank" rel="noreferrer">Web Fonts</a></p>
+  </footer>
+
+  <script src="./js/home.js"></script>
 </body>
 </html>
