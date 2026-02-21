@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 type Repo struct {
@@ -60,19 +62,44 @@ type RepoOverride struct {
 	PinOrder    int    `json:"pinOrder"`
 }
 
+type THMSkill struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
+}
+
 type App struct {
-	mu          sync.RWMutex
-	repos       []Repo
-	overrides   map[string]RepoOverride
-	siteData    SiteData
-	githubUser  string
-	githubToken string
-	thmUser     string
-	thmSession  string
+	mu              sync.RWMutex
+	repos           []Repo
+	overrides       map[string]RepoOverride
+	siteData        SiteData
+	githubUser      string
+	githubToken     string
+	thmUser         string
+	thmSession      string
+	thmCookie       string
+	thmSkillsRole   string
+	thmSkillsSegment string
 }
 
 func main() {
-	app := &App{githubUser: os.Getenv("GITHUB_USERNAME"), githubToken: os.Getenv("GITHUB_TOKEN"), thmUser: os.Getenv("THM_USERNAME"), thmSession: os.Getenv("THM_SESSION"), overrides: map[string]RepoOverride{}}
+	role := os.Getenv("THM_SKILLS_ROLE")
+	if role == "" {
+		role = "Foundational"
+	}
+	segment := os.Getenv("THM_SKILLS_SEGMENT")
+	if segment == "" {
+		segment = "entry"
+	}
+	app := &App{
+		githubUser:      os.Getenv("GITHUB_USERNAME"),
+		githubToken:     os.Getenv("GITHUB_TOKEN"),
+		thmUser:         os.Getenv("THM_USERNAME"),
+		thmSession:      os.Getenv("THM_SESSION"),
+		thmCookie:       os.Getenv("THM_COOKIE"),
+		thmSkillsRole:   role,
+		thmSkillsSegment: segment,
+		overrides:        map[string]RepoOverride{},
+	}
 	if app.githubUser == "" {
 		app.githubUser = "octocat"
 	}
@@ -241,23 +268,86 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 		respondJSON(w, map[string]any{"enabled": false, "message": "Set THM_USERNAME to enable TryHackMe stats."})
 		return
 	}
-	url := "https://tryhackme.com/api/v2/public-profile?username=" + a.thmUser
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	if a.thmSession != "" {
-		req.Header.Set("Cookie", "connect.sid="+a.thmSession)
-	}
-	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
-	if err != nil {
-		respondJSON(w, map[string]any{"enabled": true, "error": err.Error()})
+	client := &http.Client{Timeout: 20 * time.Second}
+	profileURL := "https://tryhackme.com/api/v2/public-profile?username=" + url.QueryEscape(a.thmUser)
+	profileData, profileErr := a.fetchTHMJSON(client, profileURL)
+
+	skillsURL := fmt.Sprintf(
+		"https://tryhackme.com/api/v2/users/skills?role=%s&segment=%s",
+		url.QueryEscape(a.thmSkillsRole),
+		url.QueryEscape(a.thmSkillsSegment),
+	)
+	skillsData, skillsErr := a.fetchTHMJSON(client, skillsURL)
+	normalizedSkills := normalizeTHMSkills(skillsData)
+
+	if profileErr != nil && skillsErr != nil {
+		respondJSON(w, map[string]any{"enabled": true, "error": "Unable to fetch TryHackMe profile and skills data", "profileError": profileErr.Error(), "skillsError": skillsErr.Error()})
 		return
+	}
+
+	payload := map[string]any{
+		"publicProfile": profileData,
+		"skillsResponse": map[string]any{
+			"role":    a.thmSkillsRole,
+			"segment": a.thmSkillsSegment,
+			"data":    skillsData,
+		},
+		"skillsMatrix": normalizedSkills,
+	}
+	if profileErr != nil {
+		payload["profileError"] = profileErr.Error()
+	}
+	if skillsErr != nil {
+		payload["skillsError"] = skillsErr.Error()
+	} else if len(normalizedSkills) == 0 {
+		payload["skillsError"] = "Skills endpoint returned no parsable matrix values. Ensure THM_COOKIE/THM_SESSION includes a valid connect.sid session."
+	}
+
+	respondJSON(w, map[string]any{"enabled": true, "data": payload})
+}
+
+func (a *App) fetchTHMJSON(client *http.Client, endpoint string) (any, error) {
+	req, _ := http.NewRequest(http.MethodGet, endpoint, nil)
+	req.Header.Set("Accept", "application/json")
+	if cookie := a.thmCookieHeader(); cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = http.StatusText(resp.StatusCode)
+		}
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, msg)
+	}
 	var v any
 	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
-		respondJSON(w, map[string]any{"enabled": true, "error": "Unable to parse TryHackMe response"})
-		return
+		return nil, err
 	}
-	respondJSON(w, map[string]any{"enabled": true, "data": v})
+	return v, nil
+}
+
+func (a *App) thmCookieHeader() string {
+	cookie := strings.TrimSpace(a.thmCookie)
+	if cookie != "" {
+		return cookie
+	}
+	session := strings.TrimSpace(a.thmSession)
+	if session == "" {
+		return ""
+	}
+	// Backward compatibility:
+	// - THM_SESSION="<raw connect.sid value>"
+	// - THM_SESSION="connect.sid=<...>; other=<...>"
+	if strings.Contains(session, "=") {
+		return session
+	}
+	return "connect.sid=" + session
 }
 
 func respondJSON(w http.ResponseWriter, v any) {
@@ -294,4 +384,246 @@ func asStringSlice(v any) []string {
 		}
 	}
 	return res
+}
+
+func asFloat64(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case float32:
+		return float64(t), true
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case int32:
+		return float64(t), true
+	case string:
+		n, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
+func pickFirstNumericField(m map[string]any, keys ...string) (float64, bool) {
+	for _, key := range keys {
+		if v, ok := m[key]; ok {
+			if n, ok := asFloat64(v); ok {
+				return n, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func pickFirstStringField(m map[string]any, keys ...string) (string, bool) {
+	for _, key := range keys {
+		if v, ok := m[key]; ok {
+			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s), true
+			}
+		}
+	}
+	return "", false
+}
+
+func pickDeepNumericField(v any, keys ...string) (float64, bool) {
+	if v == nil {
+		return 0, false
+	}
+	keySet := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		keySet[strings.ToLower(strings.TrimSpace(key))] = struct{}{}
+	}
+	candidates := []float64{}
+	var walk func(any)
+	walk = func(node any) {
+		switch t := node.(type) {
+		case map[string]any:
+			for k, child := range t {
+				if _, wanted := keySet[strings.ToLower(strings.TrimSpace(k))]; wanted {
+					if n, ok := asFloat64(child); ok {
+						candidates = append(candidates, n)
+					}
+				}
+				walk(child)
+			}
+		case []any:
+			for _, child := range t {
+				walk(child)
+			}
+		}
+	}
+	walk(v)
+	if len(candidates) == 0 {
+		return 0, false
+	}
+	best := candidates[0]
+	for i := 1; i < len(candidates); i++ {
+		if candidates[i] > best {
+			best = candidates[i]
+		}
+	}
+	return best, true
+}
+
+func normalizeTHMSkills(raw any) []THMSkill {
+	if raw == nil {
+		return nil
+	}
+	out := collectTHMSkills(raw)
+	if len(out) == 0 {
+		return nil
+	}
+	return dedupeAndSortTHMSkills(out)
+}
+
+func collectTHMSkills(raw any) []THMSkill {
+	var out []THMSkill
+	queue := []any{raw}
+
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+
+		switch t := node.(type) {
+		case map[string]any:
+			if name, ok := pickFirstStringField(t, "name", "skill", "title", "category", "label", "dimension"); ok {
+				if value, ok := pickFirstNumericField(t, "value", "score", "level", "progress", "percent", "percentage", "points", "xp"); ok {
+					out = append(out, THMSkill{Name: humanizeSkillName(name), Value: value})
+				} else if value, ok := pickDeepNumericField(t, "value", "score", "level", "progress", "percent", "percentage", "points", "xp", "completed"); ok {
+					out = append(out, THMSkill{Name: humanizeSkillName(name), Value: value})
+				}
+			}
+			for k, v := range t {
+				if n, ok := asFloat64(v); ok && looksLikeSkillName(k) {
+					out = append(out, THMSkill{Name: humanizeSkillName(k), Value: n})
+					continue
+				}
+				if childMap, ok := v.(map[string]any); ok && looksLikeSkillName(k) {
+					if n, ok := pickFirstNumericField(childMap, "value", "score", "level", "progress", "percent", "percentage", "points", "xp"); ok {
+						out = append(out, THMSkill{Name: humanizeSkillName(k), Value: n})
+						continue
+					}
+					if n, ok := pickDeepNumericField(childMap, "value", "score", "level", "progress", "percent", "percentage", "points", "xp", "completed"); ok {
+						out = append(out, THMSkill{Name: humanizeSkillName(k), Value: n})
+						continue
+					}
+				}
+				if v != nil {
+					queue = append(queue, v)
+				}
+			}
+
+		case []any:
+			for _, child := range t {
+				queue = append(queue, child)
+			}
+		}
+	}
+
+	return out
+}
+
+func dedupeAndSortTHMSkills(in []THMSkill) []THMSkill {
+	seen := map[string]THMSkill{}
+	for _, skill := range in {
+		name := strings.TrimSpace(skill.Name)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		current, exists := seen[key]
+		if !exists || skill.Value > current.Value {
+			seen[key] = THMSkill{Name: name, Value: skill.Value}
+		}
+	}
+	out := make([]THMSkill, 0, len(seen))
+	for _, skill := range seen {
+		out = append(out, skill)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		oi, okI := thmSkillOrder(out[i].Name)
+		oj, okJ := thmSkillOrder(out[j].Name)
+		if okI && okJ {
+			return oi < oj
+		}
+		if okI {
+			return true
+		}
+		if okJ {
+			return false
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func thmSkillOrder(name string) (int, bool) {
+	n := strings.ToLower(strings.TrimSpace(name))
+	order := map[string]int{
+		"security operations": 1,
+		"incident response":   2,
+		"malware analysis":    3,
+		"penetration testing": 4,
+		"exploitation":        5,
+		"red teaming":         6,
+	}
+	idx, ok := order[n]
+	return idx, ok
+}
+
+func looksLikeSkillName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return false
+	}
+	if strings.Contains(n, "security") || strings.Contains(n, "incident") || strings.Contains(n, "malware") ||
+		strings.Contains(n, "penetration") || strings.Contains(n, "exploit") || strings.Contains(n, "red team") ||
+		strings.Contains(n, "forensic") || strings.Contains(n, "web") || strings.Contains(n, "crypto") {
+		return true
+	}
+	deny := map[string]struct{}{
+		"data": {}, "meta": {}, "role": {}, "segment": {}, "id": {}, "name": {}, "title": {}, "value": {},
+		"status": {}, "message": {}, "errors": {}, "createdat": {}, "updatedat": {}, "username": {},
+	}
+	if _, blocked := deny[n]; blocked {
+		return false
+	}
+	return strings.Contains(n, "skill")
+}
+
+func humanizeSkillName(value string) string {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return ""
+	}
+	var b strings.Builder
+	prevLowerOrDigit := false
+	for _, r := range raw {
+		if r == '_' || r == '-' {
+			b.WriteRune(' ')
+			prevLowerOrDigit = false
+			continue
+		}
+		if unicode.IsUpper(r) && prevLowerOrDigit {
+			b.WriteRune(' ')
+		}
+		b.WriteRune(r)
+		prevLowerOrDigit = unicode.IsLower(r) || unicode.IsDigit(r)
+	}
+	parts := strings.Fields(strings.ToLower(b.String()))
+	for i, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		r := []rune(part)
+		r[0] = unicode.ToUpper(r[0])
+		parts[i] = string(r)
+	}
+	return strings.Join(parts, " ")
 }
