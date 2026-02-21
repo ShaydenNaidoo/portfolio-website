@@ -1,0 +1,26 @@
+{
+  "displayName": "Your Name",
+  "headline": "Offensive Security & Full-Stack Engineer",
+  "bio": "I build secure applications and automation with measurable business impact.",
+  "cvUrl": "https://example.com/cv.pdf",
+  "languages": ["Go", "TypeScript", "JavaScript", "Python", "Bash", "SQL"],
+  "certifications": [
+    {
+      "name": "eJPT",
+      "issuer": "INE Security",
+      "date": "2025",
+      "url": "https://example.com/certificate"
+    }
+  ],
+  "experience": [
+    {
+      "role": "Security Engineer",
+      "company": "Your Company",
+      "dateRange": "2023 - Present",
+      "description": [
+        "Implemented secure SDLC controls.",
+        "Automated vulnerability reporting pipelines."
+      ]
+    }
+  ]
+}
