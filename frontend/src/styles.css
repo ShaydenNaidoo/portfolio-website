@@ -1,0 +1,14 @@
+:root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+body { margin: 0; background: #0b1020; color: #e2e8f0; }
+main { max-width: 1000px; margin: 0 auto; padding: 2rem 1rem; display: grid; gap: 1rem; }
+.card { background: #141b34; border: 1px solid #263159; border-radius: 14px; padding: 1rem; }
+.hero h1 { margin: 0 0 .3rem 0; }
+.hero a { color: #7dd3fc; }
+.tags { display: flex; flex-wrap: wrap; gap: .5rem; }
+.tag { border: 1px solid #22d3ee; color: #67e8f9; padding: .2rem .6rem; border-radius: 999px; font-size: .85rem; }
+.row { display: flex; gap: .5rem; align-items: center; justify-content: space-between; }
+.repo { border-top: 1px dashed #334155; padding-top: .8rem; margin-top: .8rem; }
+textarea { width: 100%; min-height: 52px; background: #0b1020; color: white; border: 1px solid #334155; border-radius: 8px; margin: .35rem 0; padding: .5rem; }
+button { background: #1d4ed8; color: white; border: 0; border-radius: 8px; padding: .35rem .65rem; cursor: pointer; }
+.pin { background: #a21caf; padding: .15rem .5rem; border-radius: 999px; font-size: .75rem; }
+.loading { padding: 3rem; color: white; }
