@@ -29,6 +29,12 @@ This repo now includes a production-ready portfolio stack:
    - Languages (tag/badge style)
    - TryHackMe stats panel
 
+5. **Admin-only Mission Control**
+   - Persona-style daily mission/task tracker
+   - Calendar view for due dates and upcoming tests/assignments
+   - Academic module progress calculators seeded from study-guide assessment formulas
+   - Persisted data in `backend/data/admin_mission_control.json`
+
 ## Quick start
 
 ### 1) Backend
@@ -44,6 +50,12 @@ Environment variables:
 - `GITHUB_TOKEN` (optional but recommended to avoid rate limits)
 - `THM_USERNAME` (optional)
 - `THM_SESSION` (optional cookie value if private stats require session auth)
+- `THM_COOKIE` (optional full cookie header; preferred when syncing skills + completed room names)
+- `ADMIN_USERNAME` (optional, default `shayden`)
+- `ADMIN_PASSWORD_HASH` (required for secure admin login)
+- `ADMIN_PASSWORD` (legacy plaintext fallback; avoid in production)
+- `MONGODB_URI` (optional; enables MongoDB persistence for admin blog posts and mission tracker)
+- `MONGODB_DATABASE` (optional; default `portfolio`)
 - `PORT` (optional, default `8080`)
 
 ### 2) Frontend
@@ -72,6 +84,32 @@ Edit this file for your profile sections:
 Project overrides are written automatically to:
 
 - `backend/data/repo_overrides.json`
+
+Mission and module progress data is written automatically to:
+
+- `backend/data/admin_mission_control.json`
+
+If `MONGODB_URI` is set, blog posts and mission data are persisted in MongoDB collections:
+
+- `blog_posts`
+- `missions`
+- `module_progress`
+
+## Manual AI project thumbnails
+
+This repo supports manual per-project thumbnail imports.
+
+1. Generate thumbnails using the Persona 5 themed prompts in:
+   - `frontend/public/assets/project-art/PROMPTS.md`
+2. Save generated files into:
+   - `frontend/public/assets/project-art/`
+3. Current mapped filenames:
+   - `green-cart-p5r.png`
+   - `cos301-computer-networks-p5r.png`
+   - `portfolio-website-p5r.png`
+   - `assemblywork-p5r.png`
+4. If your project names differ, edit the `MANUAL_PROJECT_IMAGES` map in:
+   - `frontend/src/main.jsx`
 
 ## Production deployment (fully online)
 

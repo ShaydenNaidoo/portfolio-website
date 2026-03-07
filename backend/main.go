@@ -1,6 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,14 +52,27 @@ type Experience struct {
 	Description []string `json:"description"`
 }
 
+type BlogPost struct {
+	ID        string `json:"id,omitempty" bson:"id,omitempty"`
+	Title     string `json:"title,omitempty" bson:"title,omitempty"`
+	Date      string `json:"date,omitempty" bson:"date,omitempty"`
+	Excerpt   string `json:"excerpt,omitempty" bson:"excerpt,omitempty"`
+	URL       string `json:"url,omitempty" bson:"url,omitempty"`
+	Content   string `json:"content,omitempty" bson:"content,omitempty"`
+	ImageData string `json:"imageData,omitempty" bson:"imageData,omitempty"`
+	CreatedAt string `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+}
+
 type SiteData struct {
 	DisplayName    string          `json:"displayName"`
 	Headline       string          `json:"headline"`
 	Bio            string          `json:"bio"`
 	CVURL          string          `json:"cvUrl"`
+	LinkedInURL    string          `json:"linkedinUrl"`
 	Languages      []string        `json:"languages"`
 	Certifications []Certification `json:"certifications"`
 	Experience     []Experience    `json:"experience"`
+	BlogPosts      []BlogPost      `json:"blogPosts"`
 }
 
 type RepoOverride struct {
@@ -67,18 +87,39 @@ type THMSkill struct {
 	Value float64 `json:"value"`
 }
 
+type AdminLoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type AdminLoginResponse struct {
+	Token     string `json:"token"`
+	Username  string `json:"username"`
+	ExpiresAt string `json:"expiresAt"`
+}
+
+type AdminBlogCreateRequest struct {
+	Content   string `json:"content"`
+	ImageData string `json:"imageData"`
+}
+
 type App struct {
-	mu              sync.RWMutex
-	repos           []Repo
-	overrides       map[string]RepoOverride
-	siteData        SiteData
-	githubUser      string
-	githubToken     string
-	thmUser         string
-	thmSession      string
-	thmCookie       string
-	thmSkillsRole   string
-	thmSkillsSegment string
+	mu                sync.RWMutex
+	repos             []Repo
+	overrides         map[string]RepoOverride
+	siteData          SiteData
+	missionControl    MissionControlStore
+	mongoStore        *MongoStore
+	githubUser        string
+	githubToken       string
+	thmUser           string
+	thmSession        string
+	thmCookie         string
+	thmSkillsRole     string
+	thmSkillsSegment  string
+	adminUsername     string
+	adminPasswordHash string
+	adminSessions     map[string]time.Time
 }
 
 func main() {
@@ -90,21 +131,46 @@ func main() {
 	if segment == "" {
 		segment = "entry"
 	}
+	adminUser := strings.TrimSpace(os.Getenv("ADMIN_USERNAME"))
+	if adminUser == "" {
+		adminUser = "shayden"
+	}
+	adminHash := strings.TrimSpace(os.Getenv("ADMIN_PASSWORD_HASH"))
+	adminPassLegacy := strings.TrimSpace(os.Getenv("ADMIN_PASSWORD"))
+	if adminHash == "" && adminPassLegacy != "" {
+		generatedHash, err := newPBKDF2PasswordHash(adminPassLegacy)
+		if err != nil {
+			panic(fmt.Errorf("failed to generate ADMIN_PASSWORD_HASH from ADMIN_PASSWORD: %w", err))
+		}
+		adminHash = generatedHash
+		fmt.Println("Using legacy ADMIN_PASSWORD env var. Set ADMIN_PASSWORD_HASH instead for better secret hygiene.")
+	}
+	if adminHash == "" {
+		panic("missing ADMIN_PASSWORD_HASH (or legacy ADMIN_PASSWORD)")
+	}
+	if _, _, _, err := parsePBKDF2Hash(adminHash); err != nil {
+		panic(fmt.Errorf("invalid ADMIN_PASSWORD_HASH: %w", err))
+	}
 	app := &App{
-		githubUser:      os.Getenv("GITHUB_USERNAME"),
-		githubToken:     os.Getenv("GITHUB_TOKEN"),
-		thmUser:         os.Getenv("THM_USERNAME"),
-		thmSession:      os.Getenv("THM_SESSION"),
-		thmCookie:       os.Getenv("THM_COOKIE"),
-		thmSkillsRole:   role,
-		thmSkillsSegment: segment,
-		overrides:        map[string]RepoOverride{},
+		githubUser:        os.Getenv("GITHUB_USERNAME"),
+		githubToken:       os.Getenv("GITHUB_TOKEN"),
+		thmUser:           os.Getenv("THM_USERNAME"),
+		thmSession:        os.Getenv("THM_SESSION"),
+		thmCookie:         os.Getenv("THM_COOKIE"),
+		thmSkillsRole:     role,
+		thmSkillsSegment:  segment,
+		overrides:         map[string]RepoOverride{},
+		adminUsername:     adminUser,
+		adminPasswordHash: adminHash,
+		adminSessions:     map[string]time.Time{},
 	}
 	if app.githubUser == "" {
 		app.githubUser = "octocat"
 	}
+	app.initMongoStoreFromEnv()
 	app.loadSiteData()
 	app.loadOverrides()
+	app.loadMissionControl()
 	_ = app.refreshRepos()
 
 	mux := http.NewServeMux()
@@ -112,6 +178,12 @@ func main() {
 	mux.HandleFunc("/api/repos", app.handleRepos)
 	mux.HandleFunc("/api/admin/repo/", app.handleRepoUpdate)
 	mux.HandleFunc("/api/admin/refresh", app.handleRefresh)
+	mux.HandleFunc("/api/admin/login", app.handleAdminLogin)
+	mux.HandleFunc("/api/admin/logout", app.handleAdminLogout)
+	mux.HandleFunc("/api/admin/session", app.handleAdminSession)
+	mux.HandleFunc("/api/admin/blog", app.handleAdminBlogCreate)
+	mux.HandleFunc("/api/admin/mission-control", app.handleAdminMissionControl)
+	mux.HandleFunc("/api/admin/mission-control/", app.handleAdminMissionControlSubroute)
 	mux.HandleFunc("/api/tryhackme", app.handleTHM)
 	mux.HandleFunc("/webhooks/github", app.handleGitHubWebhook)
 
@@ -119,6 +191,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	fmt.Printf("Admin login enabled for user: %s (set ADMIN_USERNAME/ADMIN_PASSWORD_HASH in production)\n", app.adminUsername)
 	fmt.Printf("Backend running on :%s\n", port)
 	if err := http.ListenAndServe(":"+port, withCORS(mux)); err != nil {
 		panic(err)
@@ -128,8 +201,8 @@ func main() {
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -141,10 +214,29 @@ func withCORS(next http.Handler) http.Handler {
 func (a *App) loadSiteData() {
 	b, err := os.ReadFile("data/site_data.json")
 	if err != nil {
-		a.siteData = SiteData{DisplayName: "Your Name", Headline: "Full-Stack Engineer", Bio: "I build secure, production-ready applications.", CVURL: "", Languages: []string{"Go", "TypeScript", "Python"}}
-		return
+		a.siteData = SiteData{
+			DisplayName: "Your Name",
+			Headline:    "Full-Stack Engineer",
+			Bio:         "I build secure, production-ready applications.",
+			CVURL:       "",
+			LinkedInURL: "",
+			Languages:   []string{"Go", "TypeScript", "Python"},
+			BlogPosts:   []BlogPost{},
+		}
+	} else {
+		_ = json.Unmarshal(b, &a.siteData)
 	}
-	_ = json.Unmarshal(b, &a.siteData)
+	if a.siteData.BlogPosts == nil {
+		a.siteData.BlogPosts = []BlogPost{}
+	}
+	if a.mongoStore != nil {
+		posts, err := a.mongoStore.LoadBlogPosts()
+		if err != nil {
+			fmt.Printf("Mongo blog load failed, using JSON fallback: %v\n", err)
+		} else {
+			a.siteData.BlogPosts = posts
+		}
+	}
 }
 
 func (a *App) loadOverrides() {
@@ -163,7 +255,19 @@ func (a *App) saveOverrides() error {
 	return os.WriteFile("data/repo_overrides.json", b, 0o644)
 }
 
-func (a *App) handleProfile(w http.ResponseWriter, _ *http.Request) { respondJSON(w, a.siteData) }
+func (a *App) saveSiteDataLocked() error {
+	b, err := json.MarshalIndent(a.siteData, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile("data/site_data.json", b, 0o644)
+}
+
+func (a *App) handleProfile(w http.ResponseWriter, _ *http.Request) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	respondJSON(w, a.siteData)
+}
 
 func (a *App) handleRepos(w http.ResponseWriter, _ *http.Request) {
 	a.mu.RLock()
@@ -171,7 +275,15 @@ func (a *App) handleRepos(w http.ResponseWriter, _ *http.Request) {
 	respondJSON(w, a.repos)
 }
 
-func (a *App) handleRefresh(w http.ResponseWriter, _ *http.Request) {
+func (a *App) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.isAuthorizedAdmin(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	if err := a.refreshRepos(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -182,6 +294,10 @@ func (a *App) handleRefresh(w http.ResponseWriter, _ *http.Request) {
 func (a *App) handleRepoUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.isAuthorizedAdmin(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	name := strings.TrimPrefix(r.URL.Path, "/api/admin/repo/")
@@ -200,6 +316,177 @@ func (a *App) handleRepoUpdate(w http.ResponseWriter, r *http.Request) {
 	a.mu.Unlock()
 	_ = a.refreshRepos()
 	respondJSON(w, map[string]string{"status": "updated"})
+}
+
+func (a *App) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var in AdminLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	username := strings.TrimSpace(in.Username)
+	password := strings.TrimSpace(in.Password)
+	if username == "" || password == "" {
+		http.Error(w, "username and password are required", http.StatusBadRequest)
+		return
+	}
+
+	if username != a.adminUsername || !verifyPBKDF2Password(password, a.adminPasswordHash) {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	token, err := newSessionToken()
+	if err != nil {
+		http.Error(w, "failed to create session", http.StatusInternalServerError)
+		return
+	}
+	expiresAt := time.Now().UTC().Add(7 * 24 * time.Hour)
+
+	a.mu.Lock()
+	a.cleanExpiredAdminSessionsLocked(time.Now().UTC())
+	a.adminSessions[token] = expiresAt
+	a.mu.Unlock()
+
+	respondJSON(w, AdminLoginResponse{
+		Token:     token,
+		Username:  a.adminUsername,
+		ExpiresAt: expiresAt.Format(time.RFC3339),
+	})
+}
+
+func (a *App) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	token := bearerTokenFromRequest(r)
+	if token != "" {
+		a.mu.Lock()
+		delete(a.adminSessions, token)
+		a.mu.Unlock()
+	}
+	respondJSON(w, map[string]any{"status": "ok"})
+}
+
+func (a *App) handleAdminSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.isAuthorizedAdmin(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	respondJSON(w, map[string]any{
+		"authenticated": true,
+		"username":      a.adminUsername,
+	})
+}
+
+func (a *App) handleAdminBlogCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.isAuthorizedAdmin(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var in AdminBlogCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	content := strings.TrimSpace(in.Content)
+	if content == "" {
+		http.Error(w, "post content is required", http.StatusBadRequest)
+		return
+	}
+	if utf8Len(content) > 1000 {
+		http.Error(w, "post content must be 1000 characters or fewer", http.StatusBadRequest)
+		return
+	}
+
+	imageData := strings.TrimSpace(in.ImageData)
+	if err := validateBlogImageData(imageData); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC()
+	postIDToken, err := newSessionToken()
+	if err != nil {
+		http.Error(w, "failed to create post id", http.StatusInternalServerError)
+		return
+	}
+	post := BlogPost{
+		ID:        "post-" + postIDToken[:12],
+		Content:   content,
+		ImageData: imageData,
+		CreatedAt: now.Format(time.RFC3339),
+		Date:      now.Format("2006-01-02"),
+		Excerpt:   truncateRunes(content, 180),
+	}
+
+	if a.mongoStore != nil {
+		if err := a.mongoStore.UpsertBlogPost(post); err != nil {
+			http.Error(w, "failed to save blog post", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	a.mu.Lock()
+	a.siteData.BlogPosts = append([]BlogPost{post}, a.siteData.BlogPosts...)
+	if a.mongoStore == nil {
+		if err := a.saveSiteDataLocked(); err != nil {
+			a.mu.Unlock()
+			http.Error(w, "failed to save blog post", http.StatusInternalServerError)
+			return
+		}
+	}
+	a.mu.Unlock()
+
+	respondJSON(w, map[string]any{
+		"status": "created",
+		"post":   post,
+	})
+}
+
+func (a *App) cleanExpiredAdminSessionsLocked(now time.Time) {
+	for token, expiresAt := range a.adminSessions {
+		if now.After(expiresAt) {
+			delete(a.adminSessions, token)
+		}
+	}
+}
+
+func (a *App) isAuthorizedAdmin(r *http.Request) bool {
+	token := bearerTokenFromRequest(r)
+	if token == "" {
+		return false
+	}
+	now := time.Now().UTC()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cleanExpiredAdminSessionsLocked(now)
+	expiresAt, ok := a.adminSessions[token]
+	if !ok {
+		return false
+	}
+	if now.After(expiresAt) {
+		delete(a.adminSessions, token)
+		return false
+	}
+	return true
 }
 
 func (a *App) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
@@ -280,8 +567,24 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	skillsData, skillsErr := a.fetchTHMJSON(client, skillsURL)
 	normalizedSkills := normalizeTHMSkills(skillsData)
 
-	if profileErr != nil && skillsErr != nil {
-		respondJSON(w, map[string]any{"enabled": true, "error": "Unable to fetch TryHackMe profile and skills data", "profileError": profileErr.Error(), "skillsError": skillsErr.Error()})
+	completedRooms, completedRoomsCount, roomsErr := a.fetchTHMCompletedRooms(client)
+	profileRooms := extractTHMRoomNames(profileData)
+	completedRooms = mergeUniqueStrings(completedRooms, profileRooms)
+	if profileRoomCount, ok := extractTHMRoomCount(profileData); ok && profileRoomCount > completedRoomsCount {
+		completedRoomsCount = profileRoomCount
+	}
+	if completedRoomsCount < len(completedRooms) {
+		completedRoomsCount = len(completedRooms)
+	}
+
+	if profileErr != nil && skillsErr != nil && roomsErr != nil {
+		respondJSON(w, map[string]any{
+			"enabled":      true,
+			"error":        "Unable to fetch TryHackMe profile, skills, and completed rooms data",
+			"profileError": profileErr.Error(),
+			"skillsError":  skillsErr.Error(),
+			"roomsError":   roomsErr.Error(),
+		})
 		return
 	}
 
@@ -292,7 +595,10 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 			"segment": a.thmSkillsSegment,
 			"data":    skillsData,
 		},
-		"skillsMatrix": normalizedSkills,
+		"skillsMatrix":         normalizedSkills,
+		"completedRooms":       completedRooms,
+		"completedRoomsCount":  completedRoomsCount,
+		"completedRoomsSource": "/api/all-completed-rooms",
 	}
 	if profileErr != nil {
 		payload["profileError"] = profileErr.Error()
@@ -302,13 +608,20 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	} else if len(normalizedSkills) == 0 {
 		payload["skillsError"] = "Skills endpoint returned no parsable matrix values. Ensure THM_COOKIE/THM_SESSION includes a valid connect.sid session."
 	}
+	if roomsErr != nil {
+		payload["completedRoomsError"] = roomsErr.Error()
+	}
 
 	respondJSON(w, map[string]any{"enabled": true, "data": payload})
 }
 
 func (a *App) fetchTHMJSON(client *http.Client, endpoint string) (any, error) {
 	req, _ := http.NewRequest(http.MethodGet, endpoint, nil)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://tryhackme.com/")
+	req.Header.Set("Origin", "https://tryhackme.com")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	if cookie := a.thmCookieHeader(); cookie != "" {
 		req.Header.Set("Cookie", cookie)
 	}
@@ -317,17 +630,35 @@ func (a *App) fetchTHMJSON(client *http.Client, endpoint string) (any, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	trimmed := strings.TrimSpace(string(body))
+
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		msg := strings.TrimSpace(string(body))
+		msg := trimmed
 		if msg == "" {
 			msg = http.StatusText(resp.StatusCode)
 		}
-		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, msg)
+		return nil, fmt.Errorf("status %d from %s: %s", resp.StatusCode, endpoint, msg)
 	}
+
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty response body from %s", endpoint)
+	}
+
+	raw := bytes.TrimSpace(body)
 	var v any
-	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
-		return nil, err
+	if err := json.Unmarshal(raw, &v); err != nil {
+		preview := strings.TrimSpace(string(raw))
+		preview = strings.ReplaceAll(preview, "\n", " ")
+		preview = strings.ReplaceAll(preview, "\r", " ")
+		if len(preview) > 180 {
+			preview = preview[:180] + "..."
+		}
+		if len(raw) > 0 && raw[0] == '<' {
+			return nil, fmt.Errorf("non-JSON HTML response from %s (likely blocked or auth/session issue)", endpoint)
+		}
+		return nil, fmt.Errorf("invalid JSON from %s: %v (body preview: %s)", endpoint, err, preview)
 	}
 	return v, nil
 }
@@ -348,6 +679,449 @@ func (a *App) thmCookieHeader() string {
 		return session
 	}
 	return "connect.sid=" + session
+}
+
+func (a *App) fetchTHMCompletedRooms(client *http.Client) ([]string, int, error) {
+	if strings.TrimSpace(a.thmUser) == "" {
+		return nil, 0, fmt.Errorf("missing THM username")
+	}
+
+	var out []string
+	expectedCount := 0
+
+	primaryRooms, primaryCount, primaryErr := a.fetchTHMCompletedRoomsFromAllCompletedEndpoint(client)
+	out = mergeUniqueStrings(out, primaryRooms)
+	if primaryCount > expectedCount {
+		expectedCount = primaryCount
+	}
+
+	var fallbackErr error
+	if len(out) == 0 || primaryErr != nil {
+		fallbackRooms, fallbackCount, err := a.fetchTHMCompletedRoomsFromMyRoomsEndpoint(client)
+		fallbackErr = err
+		out = mergeUniqueStrings(out, fallbackRooms)
+		if fallbackCount > expectedCount {
+			expectedCount = fallbackCount
+		}
+	}
+
+	countEndpoint, countErr := a.fetchTHMCompletedRoomCount(client)
+	if countErr == nil && countEndpoint > expectedCount {
+		expectedCount = countEndpoint
+	}
+	if expectedCount < len(out) {
+		expectedCount = len(out)
+	}
+
+	if len(out) > 0 {
+		return out, expectedCount, nil
+	}
+
+	if primaryErr != nil && fallbackErr != nil {
+		return nil, expectedCount, fmt.Errorf("all-completed-rooms failed: %v; my-rooms fallback failed: %v", primaryErr, fallbackErr)
+	}
+	if primaryErr != nil {
+		return nil, expectedCount, primaryErr
+	}
+	if fallbackErr != nil {
+		return nil, expectedCount, fallbackErr
+	}
+
+	return out, expectedCount, nil
+}
+
+func (a *App) fetchTHMCompletedRoomsFromAllCompletedEndpoint(client *http.Client) ([]string, int, error) {
+	const pageSize = 100
+	const maxPages = 20
+
+	var out []string
+	expectedCount := 0
+	var firstErr error
+
+	for page := 1; page <= maxPages; page++ {
+		endpoint := fmt.Sprintf(
+			"https://tryhackme.com/api/all-completed-rooms?username=%s&limit=%d&page=%d",
+			url.QueryEscape(a.thmUser),
+			pageSize,
+			page,
+		)
+		data, err := a.fetchTHMJSON(client, endpoint)
+		if err != nil {
+			if page == 1 {
+				firstErr = err
+			}
+			break
+		}
+
+		pageRooms := extractTHMRoomNames(data)
+		before := len(out)
+		out = mergeUniqueStrings(out, pageRooms)
+		added := len(out) - before
+
+		if count, ok := extractTHMRoomCount(data); ok && count > expectedCount {
+			expectedCount = count
+		}
+		if added == 0 || len(pageRooms) < pageSize {
+			break
+		}
+		if expectedCount > 0 && len(out) >= expectedCount {
+			break
+		}
+	}
+
+	if expectedCount < len(out) {
+		expectedCount = len(out)
+	}
+	if len(out) == 0 && firstErr != nil {
+		return nil, expectedCount, firstErr
+	}
+	return out, expectedCount, nil
+}
+
+func (a *App) fetchTHMCompletedRoomsFromMyRoomsEndpoint(client *http.Client) ([]string, int, error) {
+	const pageSize = 100
+	const maxPages = 20
+
+	var out []string
+	var firstErr error
+
+	for page := 1; page <= maxPages; page++ {
+		endpoint := fmt.Sprintf("https://tryhackme.com/api/my-rooms?limit=%d&page=%d", pageSize, page)
+		data, err := a.fetchTHMJSON(client, endpoint)
+		if err != nil {
+			if page == 1 {
+				firstErr = err
+			}
+			break
+		}
+
+		pageRooms, hasNext := extractTHMCompletedRoomsFromMyRooms(data)
+		out = mergeUniqueStrings(out, pageRooms)
+
+		if !hasNext {
+			break
+		}
+	}
+
+	if len(out) == 0 && firstErr != nil {
+		return nil, 0, firstErr
+	}
+	return out, len(out), nil
+}
+
+func (a *App) fetchTHMCompletedRoomCount(client *http.Client) (int, error) {
+	endpoint := "https://tryhackme.com/api/no-completed-rooms-public/" + url.PathEscape(a.thmUser)
+	data, err := a.fetchTHMJSON(client, endpoint)
+	if err != nil {
+		return 0, err
+	}
+	if count, ok := extractTHMRoomCount(data); ok {
+		return count, nil
+	}
+	if m, ok := data.(map[string]any); ok {
+		if n, ok := pickFirstNumericField(m, "count", "total"); ok {
+			if n < 0 {
+				n = 0
+			}
+			return int(n + 0.5), nil
+		}
+	}
+	return 0, fmt.Errorf("count endpoint returned no parseable numeric value")
+}
+
+func mergeUniqueStrings(base []string, extra []string) []string {
+	if len(extra) == 0 {
+		return base
+	}
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	out := make([]string, 0, len(base)+len(extra))
+	for _, item := range base {
+		normalized := strings.ToLower(strings.TrimSpace(item))
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, strings.TrimSpace(item))
+	}
+	for _, item := range extra {
+		normalized := strings.ToLower(strings.TrimSpace(item))
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, strings.TrimSpace(item))
+	}
+	return out
+}
+
+func extractTHMRoomCount(raw any) (int, bool) {
+	normalize := func(v float64) int {
+		if v < 0 {
+			return 0
+		}
+		return int(v + 0.5)
+	}
+
+	if n, ok := asFloat64(raw); ok {
+		return normalize(n), true
+	}
+
+	if m, ok := raw.(map[string]any); ok {
+		if n, ok := pickFirstNumericField(
+			m,
+			"completedRoomsNumber",
+			"completedroomsnumber",
+			"roomsCompleted",
+			"roomscompleted",
+			"completedRooms",
+			"completedrooms",
+			"roomCount",
+			"roomcount",
+			"rooms_count",
+			"noCompletedRooms",
+			"allCompletedRooms",
+		); ok {
+			return normalize(n), true
+		}
+		if n, ok := asFloat64(m["data"]); ok {
+			return normalize(n), true
+		}
+	}
+
+	if n, ok := pickDeepNumericField(
+		raw,
+		"completedRoomsNumber",
+		"completedroomsnumber",
+		"roomsCompleted",
+		"roomscompleted",
+		"completedRooms",
+		"completedrooms",
+		"roomCount",
+		"roomcount",
+		"rooms_count",
+		"noCompletedRooms",
+		"allCompletedRooms",
+	); ok {
+		return normalize(n), true
+	}
+	return 0, false
+}
+
+func extractTHMRoomNames(raw any) []string {
+	if raw == nil {
+		return nil
+	}
+
+	var out []string
+	seen := map[string]struct{}{}
+	add := func(v string) {
+		name := strings.TrimSpace(v)
+		if name == "" {
+			return
+		}
+		key := strings.ToLower(name)
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, name)
+	}
+
+	var walk func(node any, parentKey string)
+	walk = func(node any, parentKey string) {
+		switch t := node.(type) {
+		case map[string]any:
+			if looksLikeRoomObject(t) {
+				if name := extractTHMRoomNameFromMap(t); name != "" {
+					add(name)
+				}
+			}
+
+			for k, child := range t {
+				key := strings.ToLower(strings.TrimSpace(k))
+
+				if arr, ok := child.([]any); ok && looksLikeRoomCollectionKey(key) {
+					for _, item := range arr {
+						switch roomNode := item.(type) {
+						case string:
+							add(roomNode)
+						case map[string]any:
+							if name := extractTHMRoomNameFromMap(roomNode); name != "" {
+								add(name)
+							}
+						}
+					}
+				}
+
+				walk(child, key)
+			}
+		case []any:
+			for _, child := range t {
+				switch roomNode := child.(type) {
+				case string:
+					if looksLikeRoomCollectionKey(parentKey) {
+						add(roomNode)
+					}
+				case map[string]any:
+					if looksLikeRoomCollectionKey(parentKey) || looksLikeRoomObject(roomNode) {
+						if name := extractTHMRoomNameFromMap(roomNode); name != "" {
+							add(name)
+						}
+					}
+					walk(roomNode, parentKey)
+				default:
+					walk(roomNode, parentKey)
+				}
+			}
+		}
+	}
+
+	walk(raw, "")
+	return out
+}
+
+func looksLikeRoomCollectionKey(key string) bool {
+	n := strings.ToLower(strings.TrimSpace(key))
+	if n == "" {
+		return false
+	}
+	if n == "rooms" || n == "room" {
+		return true
+	}
+	if strings.Contains(n, "completedroom") || strings.Contains(n, "roomscompleted") || strings.Contains(n, "allcompletedroom") {
+		return true
+	}
+	if strings.Contains(n, "roomlist") || strings.Contains(n, "roomslist") || strings.Contains(n, "joinedrooms") {
+		return true
+	}
+	return false
+}
+
+func looksLikeRoomObject(m map[string]any) bool {
+	if m == nil {
+		return false
+	}
+	hasRoomKey := false
+	for k := range m {
+		key := strings.ToLower(strings.TrimSpace(k))
+		if strings.Contains(key, "room") {
+			hasRoomKey = true
+			break
+		}
+	}
+	if hasRoomKey {
+		return true
+	}
+	_, hasCode := m["code"]
+	_, hasSlug := m["slug"]
+	_, hasTitle := m["title"]
+	_, hasName := m["name"]
+	return (hasCode || hasSlug) && (hasTitle || hasName)
+}
+
+func extractTHMRoomNameFromMap(m map[string]any) string {
+	if m == nil {
+		return ""
+	}
+	if s, ok := pickFirstStringField(
+		m,
+		"title",
+		"name",
+		"roomName",
+		"roomname",
+		"roomTitle",
+		"roomtitle",
+	); ok {
+		return s
+	}
+	if s, ok := pickFirstStringField(
+		m,
+		"slug",
+		"code",
+		"roomCode",
+		"roomcode",
+	); ok {
+		return s
+	}
+	return ""
+}
+
+func extractTHMCompletedRoomsFromMyRooms(raw any) ([]string, bool) {
+	root, ok := raw.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+
+	roomsRaw, _ := root["rooms"].([]any)
+	out := make([]string, 0, len(roomsRaw))
+
+	for _, item := range roomsRaw {
+		room, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		completed, ok := asBool(room["userCompleted"])
+		if !ok {
+			completed = false
+		}
+		if !completed {
+			for _, key := range []string{"completed", "isCompleted", "roomCompleted", "userRoomCompleted"} {
+				if b, ok := asBool(room[key]); ok && b {
+					completed = true
+					break
+				}
+			}
+		}
+		if !completed {
+			if progress, ok := asFloat64(room["progressPercentage"]); ok && progress >= 100 {
+				completed = true
+			}
+		}
+		if !completed {
+			if progress, ok := asFloat64(room["userProgress"]); ok && progress >= 100 {
+				completed = true
+			}
+		}
+		if !completed {
+			// Some payloads expose task counters instead of a boolean completion field.
+			doneTasks, hasDone := asFloat64(room["completedTasks"])
+			totalTasks, hasTotal := asFloat64(room["totalTasks"])
+			if hasDone && hasTotal && totalTasks > 0 && doneTasks >= totalTasks {
+				completed = true
+			}
+		}
+		if !completed {
+			continue
+		}
+
+		name := extractTHMRoomNameFromMap(room)
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+
+	hasNext := false
+	if paginator, ok := root["paginator"].(map[string]any); ok {
+		if b, ok := asBool(paginator["hasNextPage"]); ok {
+			hasNext = b
+		}
+		if !hasNext {
+			page, hasPage := asFloat64(paginator["page"])
+			totalPages, hasTotalPages := asFloat64(paginator["totalPages"])
+			if hasPage && hasTotalPages && totalPages > 0 && page < totalPages {
+				hasNext = true
+			}
+		}
+	}
+
+	return out, hasNext
 }
 
 func respondJSON(w http.ResponseWriter, v any) {
@@ -386,6 +1160,183 @@ func asStringSlice(v any) []string {
 	return res
 }
 
+func bearerTokenFromRequest(r *http.Request) string {
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if auth == "" {
+		return ""
+	}
+	lower := strings.ToLower(auth)
+	if !strings.HasPrefix(lower, "bearer ") {
+		return ""
+	}
+	token := strings.TrimSpace(auth[len("Bearer "):])
+	return token
+}
+
+func newSessionToken() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func utf8Len(s string) int {
+	count := 0
+	for range s {
+		count++
+	}
+	return count
+}
+
+func truncateRunes(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(strings.TrimSpace(s))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return string(runes[:limit]) + "..."
+}
+
+func validateBlogImageData(imageData string) error {
+	if imageData == "" {
+		return nil
+	}
+	if !strings.HasPrefix(imageData, "data:image/") {
+		return fmt.Errorf("image must be a data URL beginning with data:image/")
+	}
+	parts := strings.SplitN(imageData, ",", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid image data URL")
+	}
+	header := strings.ToLower(strings.TrimSpace(parts[0]))
+	if !strings.Contains(header, ";base64") {
+		return fmt.Errorf("image data URL must use base64 encoding")
+	}
+	encoded := strings.TrimSpace(parts[1])
+	if encoded == "" {
+		return fmt.Errorf("image payload is empty")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(encoded)
+		if err != nil {
+			return fmt.Errorf("invalid base64 image payload")
+		}
+	}
+	if len(decoded) > 4<<20 {
+		return fmt.Errorf("image too large (max 4MB)")
+	}
+	return nil
+}
+
+func newPBKDF2PasswordHash(password string) (string, error) {
+	password = strings.TrimSpace(password)
+	if password == "" {
+		return "", fmt.Errorf("password cannot be empty")
+	}
+	const iterations = 600000
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	derived := pbkdf2SHA256([]byte(password), salt, iterations, 32)
+	return fmt.Sprintf(
+		"pbkdf2_sha256$%d$%s$%s",
+		iterations,
+		base64.RawURLEncoding.EncodeToString(salt),
+		base64.RawURLEncoding.EncodeToString(derived),
+	), nil
+}
+
+func verifyPBKDF2Password(password string, encodedHash string) bool {
+	iterations, salt, expected, err := parsePBKDF2Hash(encodedHash)
+	if err != nil {
+		return false
+	}
+	derived := pbkdf2SHA256([]byte(password), salt, iterations, len(expected))
+	return subtle.ConstantTimeCompare(derived, expected) == 1
+}
+
+func parsePBKDF2Hash(encodedHash string) (int, []byte, []byte, error) {
+	parts := strings.Split(strings.TrimSpace(encodedHash), "$")
+	if len(parts) != 4 {
+		return 0, nil, nil, fmt.Errorf("invalid hash format")
+	}
+	if parts[0] != "pbkdf2_sha256" {
+		return 0, nil, nil, fmt.Errorf("unsupported hash algorithm")
+	}
+	iterations, err := strconv.Atoi(parts[1])
+	if err != nil || iterations < 100000 || iterations > 5000000 {
+		return 0, nil, nil, fmt.Errorf("invalid iteration count")
+	}
+	salt, err := decodeBase64String(parts[2])
+	if err != nil || len(salt) < 8 {
+		return 0, nil, nil, fmt.Errorf("invalid salt")
+	}
+	expected, err := decodeBase64String(parts[3])
+	if err != nil || len(expected) < 16 {
+		return 0, nil, nil, fmt.Errorf("invalid hash payload")
+	}
+	return iterations, salt, expected, nil
+}
+
+func decodeBase64String(value string) ([]byte, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, fmt.Errorf("empty value")
+	}
+	if decoded, err := base64.RawURLEncoding.DecodeString(value); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.URLEncoding.DecodeString(value); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.RawStdEncoding.DecodeString(value); err == nil {
+		return decoded, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return nil, err
+	}
+	return decoded, nil
+}
+
+func pbkdf2SHA256(password []byte, salt []byte, iterations int, keyLen int) []byte {
+	if iterations <= 0 || keyLen <= 0 {
+		return nil
+	}
+	hLen := 32
+	blocks := (keyLen + hLen - 1) / hLen
+	derived := make([]byte, 0, blocks*hLen)
+
+	for block := 1; block <= blocks; block++ {
+		mac := hmac.New(sha256.New, password)
+		mac.Write(salt)
+
+		var blockBuf [4]byte
+		binary.BigEndian.PutUint32(blockBuf[:], uint32(block))
+		mac.Write(blockBuf[:])
+		u := mac.Sum(nil)
+
+		t := make([]byte, len(u))
+		copy(t, u)
+
+		for i := 1; i < iterations; i++ {
+			mac = hmac.New(sha256.New, password)
+			mac.Write(u)
+			u = mac.Sum(nil)
+			for j := range t {
+				t[j] ^= u[j]
+			}
+		}
+		derived = append(derived, t...)
+	}
+	return derived[:keyLen]
+}
+
 func asFloat64(v any) (float64, bool) {
 	switch t := v.(type) {
 	case float64:
@@ -406,6 +1357,31 @@ func asFloat64(v any) (float64, bool) {
 		return n, true
 	default:
 		return 0, false
+	}
+}
+
+func asBool(v any) (bool, bool) {
+	switch t := v.(type) {
+	case bool:
+		return t, true
+	case string:
+		n := strings.ToLower(strings.TrimSpace(t))
+		switch n {
+		case "true", "1", "yes":
+			return true, true
+		case "false", "0", "no":
+			return false, true
+		default:
+			return false, false
+		}
+	case float64:
+		return t != 0, true
+	case int:
+		return t != 0, true
+	case int64:
+		return t != 0, true
+	default:
+		return false, false
 	}
 }
 
@@ -475,92 +1451,112 @@ func normalizeTHMSkills(raw any) []THMSkill {
 	if raw == nil {
 		return nil
 	}
-	out := collectTHMSkills(raw)
-	if len(out) == 0 {
-		return nil
-	}
-	return dedupeAndSortTHMSkills(out)
-}
+	scores := map[string]float64{}
 
-func collectTHMSkills(raw any) []THMSkill {
-	var out []THMSkill
-	queue := []any{raw}
-
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
-
+	var walk func(any)
+	walk = func(node any) {
 		switch t := node.(type) {
 		case map[string]any:
 			if name, ok := pickFirstStringField(t, "name", "skill", "title", "category", "label", "dimension"); ok {
-				if value, ok := pickFirstNumericField(t, "value", "score", "level", "progress", "percent", "percentage", "points", "xp"); ok {
-					out = append(out, THMSkill{Name: humanizeSkillName(name), Value: value})
-				} else if value, ok := pickDeepNumericField(t, "value", "score", "level", "progress", "percent", "percentage", "points", "xp", "completed"); ok {
-					out = append(out, THMSkill{Name: humanizeSkillName(name), Value: value})
+				if canonical, ok := canonicalTHMSkillName(name); ok {
+					if value, ok := pickFirstNumericField(t, "value", "score", "level", "progress", "percent", "percentage", "points", "xp", "completed"); ok {
+						setTHMSkillScore(scores, canonical, value)
+					} else if value, ok := pickDeepNumericField(t, "value", "score", "level", "progress", "percent", "percentage", "points", "xp", "completed"); ok {
+						setTHMSkillScore(scores, canonical, value)
+					}
 				}
 			}
+
 			for k, v := range t {
-				if n, ok := asFloat64(v); ok && looksLikeSkillName(k) {
-					out = append(out, THMSkill{Name: humanizeSkillName(k), Value: n})
-					continue
-				}
-				if childMap, ok := v.(map[string]any); ok && looksLikeSkillName(k) {
-					if n, ok := pickFirstNumericField(childMap, "value", "score", "level", "progress", "percent", "percentage", "points", "xp"); ok {
-						out = append(out, THMSkill{Name: humanizeSkillName(k), Value: n})
-						continue
-					}
-					if n, ok := pickDeepNumericField(childMap, "value", "score", "level", "progress", "percent", "percentage", "points", "xp", "completed"); ok {
-						out = append(out, THMSkill{Name: humanizeSkillName(k), Value: n})
-						continue
+				if canonical, ok := canonicalTHMSkillName(k); ok {
+					if n, ok := asFloat64(v); ok {
+						setTHMSkillScore(scores, canonical, n)
+					} else if childMap, ok := v.(map[string]any); ok {
+						if n, ok := pickFirstNumericField(childMap, "value", "score", "level", "progress", "percent", "percentage", "points", "xp", "completed"); ok {
+							setTHMSkillScore(scores, canonical, n)
+						} else if n, ok := pickDeepNumericField(childMap, "value", "score", "level", "progress", "percent", "percentage", "points", "xp", "completed"); ok {
+							setTHMSkillScore(scores, canonical, n)
+						}
 					}
 				}
 				if v != nil {
-					queue = append(queue, v)
+					walk(v)
 				}
 			}
-
 		case []any:
 			for _, child := range t {
-				queue = append(queue, child)
+				walk(child)
 			}
 		}
 	}
 
+	walk(raw)
+	if len(scores) == 0 {
+		return nil
+	}
+
+	out := make([]THMSkill, 0, len(scores))
+	for _, name := range thmSkillCanonicalOrder() {
+		if value, ok := scores[name]; ok {
+			out = append(out, THMSkill{Name: name, Value: value})
+		}
+	}
 	return out
 }
 
-func dedupeAndSortTHMSkills(in []THMSkill) []THMSkill {
-	seen := map[string]THMSkill{}
-	for _, skill := range in {
-		name := strings.TrimSpace(skill.Name)
-		if name == "" {
-			continue
-		}
-		key := strings.ToLower(name)
-		current, exists := seen[key]
-		if !exists || skill.Value > current.Value {
-			seen[key] = THMSkill{Name: name, Value: skill.Value}
-		}
+func setTHMSkillScore(dst map[string]float64, name string, raw float64) {
+	value := raw
+	if value < 0 {
+		value = 0
 	}
-	out := make([]THMSkill, 0, len(seen))
-	for _, skill := range seen {
-		out = append(out, skill)
+	if value <= 1 {
+		value *= 100
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		oi, okI := thmSkillOrder(out[i].Name)
-		oj, okJ := thmSkillOrder(out[j].Name)
-		if okI && okJ {
-			return oi < oj
-		}
-		if okI {
-			return true
-		}
-		if okJ {
-			return false
-		}
-		return out[i].Name < out[j].Name
-	})
-	return out
+	if value > 100 {
+		value = 100
+	}
+	current, exists := dst[name]
+	if !exists || value > current {
+		dst[name] = value
+	}
+}
+
+func canonicalTHMSkillName(name string) (string, bool) {
+	n := strings.ToLower(strings.TrimSpace(name))
+	n = strings.ReplaceAll(n, "_", " ")
+	n = strings.ReplaceAll(n, "-", " ")
+	n = strings.Join(strings.Fields(n), " ")
+	n = strings.TrimSpace(n)
+	if n == "" {
+		return "", false
+	}
+	switch {
+	case strings.Contains(n, "security operations") || strings.Contains(n, "secops") || n == "soc":
+		return "Security Operations", true
+	case strings.Contains(n, "incident response"):
+		return "Incident Response", true
+	case strings.Contains(n, "malware analysis") || n == "malware":
+		return "Malware Analysis", true
+	case strings.Contains(n, "penetration testing") || strings.Contains(n, "pentest") || strings.Contains(n, "pentesting"):
+		return "Penetration Testing", true
+	case strings.Contains(n, "exploitation") || strings.Contains(n, "exploit development") || n == "exploitation":
+		return "Exploitation", true
+	case strings.Contains(n, "red teaming") || strings.Contains(n, "red team"):
+		return "Red Teaming", true
+	default:
+		return "", false
+	}
+}
+
+func thmSkillCanonicalOrder() []string {
+	return []string{
+		"Security Operations",
+		"Incident Response",
+		"Malware Analysis",
+		"Penetration Testing",
+		"Exploitation",
+		"Red Teaming",
+	}
 }
 
 func thmSkillOrder(name string) (int, bool) {

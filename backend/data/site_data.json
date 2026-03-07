@@ -3,24 +3,62 @@
   "headline": "Offensive Security & Full-Stack Engineer",
   "bio": "I build secure applications and automation with measurable business impact.",
   "cvUrl": "https://example.com/cv.pdf",
-  "languages": ["Go", "TypeScript", "JavaScript", "Python", "Bash", "SQL"],
+  "linkedinUrl": "https://www.linkedin.com/in/shayden-naidoo-b0a51b28b/",
+  "languages": [
+    "Go",
+    "TypeScript",
+    "JavaScript",
+    "Python",
+    "Bash",
+    "SQL",
+    "C++",
+    "Java",
+    "Assembly",
+    "PHP",
+    "Prolog",
+    "Scheme",
+    "Pascal"
+  ],
   "certifications": [
     {
-      "name": "eJPT",
-      "issuer": "INE Security",
-      "date": "2025",
-      "url": "https://example.com/certificate"
+      "name": "MATLAB Academy Certificate",
+      "issuer": "MathWorks",
+      "date": "2026",
+      "url": "https://matlabacademy.mathworks.com/progress/share/certificate.html?id=ec706b77-bc0f-4950-9470-464d0cf4fe75&"
     }
   ],
   "experience": [
     {
-      "role": "Security Engineer",
-      "company": "Your Company",
-      "dateRange": "2023 - Present",
+      "role": "JCP Mentor",
+      "company": "University of Pretoria",
+      "dateRange": "2025",
       "description": [
-        "Implemented secure SDLC controls.",
-        "Automated vulnerability reporting pipelines."
+        "Mentored students during JCP community work activities and requirements.",
+        "Invigilated students during JCP week and supported module coordination.",
+        "Helped students engage with community partners effectively."
+      ]
+    },
+    {
+      "role": "COS 332 Networks Teaching Assistant",
+      "company": "University of Pretoria",
+      "dateRange": "2026",
+      "description": [
+        "Assisted in COS 332, a third-year module covering communication systems terminology, network protocol hierarchies (OSI and TCP/IP), and the technical aspects of data transfer in computer networks, with a practical component focused on TCP/IP socket programming.",
+        "Marked and evaluated practical lab assignments involving TCP/IP socket programming.",
+        "Assisted students in understanding networking concepts covered in practical work.",
+        "Provided feedback to help reinforce theoretical networking concepts through implementation."
+      ]
+    },
+    {
+      "role": "Capstone Software Engineering Project (COS 301)",
+      "company": "University of Pretoria with BBD Software",
+      "dateRange": "May 2025 - Oct 2025",
+      "description": [
+        "Delivered a full-stack software project in a team of four using agile practices.",
+        "Worked across React frontend and Python/FastAPI backend with OpenAPI integration.",
+        "Applied CI/CD workflows and cloud deployment practices for a production-ready application."
       ]
     }
-  ]
+  ],
+  "blogPosts": []
 }

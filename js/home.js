@@ -1,6 +1,23 @@
 const FALLBACK_IMAGE = "./img/projects/profile-photo.jpeg";
+const GREEN_CART_IMAGE = "./img/projects/green-cart-enigmax.jpeg";
+
+const projectImageFor = (name) => {
+  const normalized = String(name || "").trim().toLowerCase();
+  if (normalized === "green-cart" || normalized === "green cart") {
+    return GREEN_CART_IMAGE;
+  }
+  return FALLBACK_IMAGE;
+};
 
 const fallbackProjects = [
+  {
+    name: "Green-Cart",
+    description: "Main capstone project for COS301-SE-2025.",
+    url: "https://github.com/COS301-SE-2025/Green-Cart",
+    language: "Capstone",
+    pushedAt: "",
+    imageUrl: GREEN_CART_IMAGE
+  },
   {
     name: "C++ City Builder",
     description: "A city-builder game made in C++ with six teammates for COS 214, showcasing multiple software design patterns.",
@@ -292,7 +309,7 @@ const setupProjects = async () => {
         url: repo.url,
         language: repo.language || "Unknown",
         pushedAt: repo.pushedAt,
-        imageUrl: FALLBACK_IMAGE
+        imageUrl: projectImageFor(repo.name)
       }));
     }
   } catch (error) {
