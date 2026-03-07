@@ -1781,7 +1781,7 @@ function App() {
               <div className="panel-title-wrap">
                 <h2 className="panel-title">Missions</h2>
               </div>
-              <p className="section-lead">Hover a card to lock target. Border highlights mirror Persona menu selection.</p>
+              <p className="section-lead">Hover a card to lock target.</p>
 
               <div className="carousel-wrap">
                 <button
