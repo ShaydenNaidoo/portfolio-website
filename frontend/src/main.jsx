@@ -1631,7 +1631,7 @@ function App() {
   const calendarHeading = calendarCursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 
   if (route !== 'cv' && loading && !profile) {
-    return <div className="loading">Loading Persona interface...</div>
+    return <div className="loading">Loading...</div>
   }
 
   return (
