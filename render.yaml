@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: shayden-portfolio-api
+    runtime: go
+    plan: free
+    region: oregon
+    branch: main
+    rootDir: backend
+    buildCommand: go build -o server .
+    startCommand: ./server
+    autoDeployTrigger: commit
+    healthCheckPath: /api/profile
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: GITHUB_USERNAME
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: THM_USERNAME
+        sync: false
+      - key: THM_SESSION
+        sync: false
+      - key: THM_COOKIE
+        sync: false
+      - key: THM_SKILLS_ROLE
+        value: Foundational
+      - key: THM_SKILLS_SEGMENT
+        value: entry
+      - key: ADMIN_USERNAME
+        value: shayden
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DATABASE
+        value: portfolio
+
+  - type: web
+    name: shayden-portfolio-web
+    runtime: static
+    region: oregon
+    branch: main
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeployTrigger: commit
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE
+        sync: false
