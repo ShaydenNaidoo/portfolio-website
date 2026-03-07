@@ -2013,7 +2013,6 @@ function App() {
             <div className="panel-title-wrap">
               <h2 className="panel-title">Curriculum Vitae</h2>
             </div>
-            <p className="section-lead">Previewing your CV in-browser. Use the browser controls to zoom or download.</p>
             <div className="cv-viewer-frame">
               <iframe className="cv-viewer" title="Shayden Naidoo CV" src={CV_PDF} />
             </div>
