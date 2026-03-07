@@ -1,0 +1,36 @@
+name: Deploy To Render
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: render-deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deploy hook secrets
+        env:
+          BACKEND_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}
+          FRONTEND_HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$BACKEND_HOOK" ] || [ -z "$FRONTEND_HOOK" ]; then
+            echo "Missing required GitHub secrets:"
+            echo "- RENDER_BACKEND_DEPLOY_HOOK_URL"
+            echo "- RENDER_FRONTEND_DEPLOY_HOOK_URL"
+            exit 1
+          fi
+
+      - name: Trigger backend deploy
+        env:
+          BACKEND_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}
+        run: curl --fail --show-error --silent --request POST "$BACKEND_HOOK"
+
+      - name: Trigger frontend deploy
+        env:
+          FRONTEND_HOOK: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL }}
+        run: curl --fail --show-error --silent --request POST "$FRONTEND_HOOK"
