@@ -22,6 +22,11 @@ import (
 	"unicode"
 )
 
+const (
+	repoCacheFile = "data/repos_cache.json"
+	thmCacheTTL   = 10 * time.Minute
+)
+
 type Repo struct {
 	ID          int64    `json:"id"`
 	Name        string   `json:"name"`
@@ -120,6 +125,8 @@ type App struct {
 	adminUsername     string
 	adminPasswordHash string
 	adminSessions     map[string]time.Time
+	thmCacheBody      []byte
+	thmCacheExpiresAt time.Time
 }
 
 func main() {
@@ -171,7 +178,12 @@ func main() {
 	app.loadSiteData()
 	app.loadOverrides()
 	app.loadMissionControl()
-	_ = app.refreshRepos()
+	app.loadRepoCache()
+	go func() {
+		if err := app.refreshRepos(); err != nil {
+			fmt.Printf("Initial GitHub refresh failed: %v\n", err)
+		}
+	}()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/profile", app.handleProfile)
@@ -253,6 +265,28 @@ func (a *App) saveOverrides() error {
 		return err
 	}
 	return os.WriteFile("data/repo_overrides.json", b, 0o644)
+}
+
+func (a *App) loadRepoCache() {
+	b, err := os.ReadFile(repoCacheFile)
+	if err != nil {
+		return
+	}
+	var cached []Repo
+	if err := json.Unmarshal(b, &cached); err != nil {
+		return
+	}
+	a.mu.Lock()
+	a.repos = cached
+	a.mu.Unlock()
+}
+
+func (a *App) saveRepoCache(repos []Repo) error {
+	b, err := json.Marshal(repos)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(repoCacheFile, b, 0o644)
 }
 
 func (a *App) saveSiteDataLocked() error {
@@ -508,7 +542,7 @@ func (a *App) refreshRepos() error {
 	if a.githubToken != "" {
 		req.Header.Set("Authorization", "Bearer "+a.githubToken)
 	}
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{Timeout: 8 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -547,6 +581,9 @@ func (a *App) refreshRepos() error {
 	a.mu.Lock()
 	a.repos = out
 	a.mu.Unlock()
+	if err := a.saveRepoCache(out); err != nil {
+		fmt.Printf("Unable to write repo cache: %v\n", err)
+	}
 	return nil
 }
 
@@ -555,7 +592,18 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 		respondJSON(w, map[string]any{"enabled": false, "message": "Set THM_USERNAME to enable TryHackMe stats."})
 		return
 	}
-	client := &http.Client{Timeout: 20 * time.Second}
+
+	now := time.Now().UTC()
+	a.mu.RLock()
+	cacheHit := len(a.thmCacheBody) > 0 && now.Before(a.thmCacheExpiresAt)
+	cacheBody := append([]byte(nil), a.thmCacheBody...)
+	a.mu.RUnlock()
+	if cacheHit {
+		respondJSONBytes(w, cacheBody)
+		return
+	}
+
+	client := &http.Client{Timeout: 12 * time.Second}
 	profileURL := "https://tryhackme.com/api/v2/public-profile?username=" + url.QueryEscape(a.thmUser)
 	profileData, profileErr := a.fetchTHMJSON(client, profileURL)
 
@@ -578,13 +626,15 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	if profileErr != nil && skillsErr != nil && roomsErr != nil {
-		respondJSON(w, map[string]any{
+		response := map[string]any{
 			"enabled":      true,
 			"error":        "Unable to fetch TryHackMe profile, skills, and completed rooms data",
 			"profileError": profileErr.Error(),
 			"skillsError":  skillsErr.Error(),
 			"roomsError":   roomsErr.Error(),
-		})
+		}
+		a.cacheTHMResponse(response)
+		respondJSON(w, response)
 		return
 	}
 
@@ -612,7 +662,20 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 		payload["completedRoomsError"] = roomsErr.Error()
 	}
 
-	respondJSON(w, map[string]any{"enabled": true, "data": payload})
+	response := map[string]any{"enabled": true, "data": payload}
+	a.cacheTHMResponse(response)
+	respondJSON(w, response)
+}
+
+func (a *App) cacheTHMResponse(payload any) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	a.mu.Lock()
+	a.thmCacheBody = body
+	a.thmCacheExpiresAt = time.Now().UTC().Add(thmCacheTTL)
+	a.mu.Unlock()
 }
 
 func (a *App) fetchTHMJSON(client *http.Client, endpoint string) (any, error) {
@@ -1127,6 +1190,11 @@ func extractTHMCompletedRoomsFromMyRooms(raw any) ([]string, bool) {
 func respondJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func respondJSONBytes(w http.ResponseWriter, body []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
 
 func asString(v any) string {

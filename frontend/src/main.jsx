@@ -8,6 +8,7 @@ const PROJECT_IMAGE = '/assets/project-fallback.jpeg'
 const GREEN_CART_IMAGE = '/assets/project-art/COS301.jpg'
 const PROJECT_ART_BASE = '/assets/project-art'
 const HERO_VIDEO = '/assets/persona-stars-loop.mp4'
+const HERO_POSTER = '/assets/cover-photo.jpg'
 const PROFILE_IMAGE = '/assets/profile-photo.jpeg'
 const CV_PDF = '/assets/shayden-naidoo-cv.pdf'
 const LINKEDIN_FALLBACK = 'https://www.linkedin.com/in/shayden-naidoo-b0a51b28b/'
@@ -948,34 +949,44 @@ function App() {
   const carouselRef = useRef(null)
   const projectRefs = useRef([])
 
-  const load = async () => {
+  const loadCoreData = async () => {
     setLoading(true)
     setError('')
 
     try {
-      const [profileRes, reposRes, thmRes] = await Promise.all([
+      const [profileRes, reposRes] = await Promise.all([
         fetch(`${API}/api/profile`),
-        fetch(`${API}/api/repos`),
-        fetch(`${API}/api/tryhackme`)
+        fetch(`${API}/api/repos`)
       ])
 
-      if (!profileRes.ok || !reposRes.ok || !thmRes.ok) {
-        throw new Error('Unable to load one or more API resources.')
+      if (!profileRes.ok || !reposRes.ok) {
+        throw new Error('Unable to load profile or repository data.')
       }
 
-      const [profileJson, reposJson, thmJson] = await Promise.all([
+      const [profileJson, reposJson] = await Promise.all([
         profileRes.json(),
-        reposRes.json(),
-        thmRes.json()
+        reposRes.json()
       ])
 
       setProfile(profileJson)
       setRepos(Array.isArray(reposJson) ? reposJson : [])
-      setThmResponse(thmJson)
     } catch (loadError) {
       setError(loadError.message || 'Failed to load portfolio data.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadTHMData = async () => {
+    try {
+      const response = await fetch(`${API}/api/tryhackme`)
+      if (!response.ok) {
+        return
+      }
+      const payload = await response.json()
+      setThmResponse(payload)
+    } catch {
+      // Do not block page rendering on optional TryHackMe enrichment.
     }
   }
 
@@ -1425,11 +1436,18 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (route === 'cv') {
+    if (route === 'cv' || profile) {
       return
     }
-    load()
-  }, [route])
+    loadCoreData()
+  }, [route, profile])
+
+  useEffect(() => {
+    if (route === 'cv' || thmResponse) {
+      return
+    }
+    loadTHMData()
+  }, [route, thmResponse])
 
   useEffect(() => {
     if (route !== 'missions') {
@@ -1752,7 +1770,7 @@ function App() {
         <>
           <header className="hero" id="top">
             <div className="hero-banner">
-              <video className="hero-video" autoPlay muted loop playsInline>
+              <video className="hero-video" autoPlay muted loop playsInline preload="metadata" poster={HERO_POSTER}>
                 <source src={HERO_VIDEO} type="video/mp4" />
               </video>
               <div className="hero-scrim" />
