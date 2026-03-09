@@ -69,9 +69,14 @@ const PROJECT_URL_OVERRIDES = {
   cos221project: 'https://github.com/nikhilpg12/COS221PROJECT'
 }
 
+const PROJECT_DESCRIPTION_OVERRIDES = {
+  cos221project: 'made for our database management module COS 221 at the university of pretoria, Hoop is a modern streaming website that allows users to manage movies and series, including functionalities for adding, editing, and deleting entries, as well as user and admin management. The website includes search functionality and user recommendations.'
+}
+
 const PROJECT_LANGUAGE_OVERRIDES = {
   'green-cart': ['JavaScript', 'Python', 'CSS'],
   'vscoders-and-the-jetbrainstormers-team-4': ['C++', 'HTML', 'JavaScript', 'CSS'],
+  cos221project: ['PHP', 'CSS', 'JavaScript'],
   'assemblywork': ['Assembly'],
   'cos-332-computer-networks': ['Pascal', 'Java', 'HTML'],
   'cos-301-computer-networks': ['Pascal', 'Java', 'HTML'],
@@ -1508,6 +1513,7 @@ function App() {
     const curated = FEATURED_PROJECTS.map((project) => {
       const key = normalizeProjectKey(project.name)
       const overrideLanguages = PROJECT_LANGUAGE_OVERRIDES[key]
+      const overrideDescription = PROJECT_DESCRIPTION_OVERRIDES[key]
       const languages = Array.isArray(project.languages) && project.languages.length
         ? project.languages
         : overrideLanguages
@@ -1515,6 +1521,7 @@ function App() {
 
       return {
         ...project,
+        description: overrideDescription || project.description,
         url: overrideURL || project.url,
         language: project.language || (languages?.[0] || 'Unknown'),
         languages,
@@ -1529,6 +1536,7 @@ function App() {
       .map((repo) => {
         const key = normalizeProjectKey(repo.name)
         const overrideLanguages = PROJECT_LANGUAGE_OVERRIDES[key]
+        const overrideDescription = PROJECT_DESCRIPTION_OVERRIDES[key]
         const languages = Array.isArray(overrideLanguages) && overrideLanguages.length
           ? overrideLanguages
           : (repo.language ? [repo.language] : undefined)
@@ -1536,7 +1544,7 @@ function App() {
 
         return {
           name: repo.name,
-          description: repo.description || 'No description available yet.',
+          description: overrideDescription || repo.description || 'No description available yet.',
           url: overrideURL || repo.url,
           language: languages?.[0] || repo.language || 'Unknown',
           languages,
