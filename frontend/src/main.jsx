@@ -61,8 +61,13 @@ const HIDDEN_PROJECT_KEYS = new Set([
   'readme-me',
   'hyperdots',
   'hyperland',
-  'shaydennaidoo'
+  'shaydennaidoo',
+  'cos221-project'
 ])
+
+const PROJECT_URL_OVERRIDES = {
+  cos221project: 'https://github.com/nikhilpg12/COS221PROJECT'
+}
 
 const PROJECT_LANGUAGE_OVERRIDES = {
   'green-cart': ['JavaScript', 'Python', 'CSS'],
@@ -1506,9 +1511,11 @@ function App() {
       const languages = Array.isArray(project.languages) && project.languages.length
         ? project.languages
         : overrideLanguages
+      const overrideURL = PROJECT_URL_OVERRIDES[key]
 
       return {
         ...project,
+        url: overrideURL || project.url,
         language: project.language || (languages?.[0] || 'Unknown'),
         languages,
         image: projectImageFor(project.name, project.image)
@@ -1525,11 +1532,12 @@ function App() {
         const languages = Array.isArray(overrideLanguages) && overrideLanguages.length
           ? overrideLanguages
           : (repo.language ? [repo.language] : undefined)
+        const overrideURL = PROJECT_URL_OVERRIDES[key]
 
         return {
           name: repo.name,
           description: repo.description || 'No description available yet.',
-          url: repo.url,
+          url: overrideURL || repo.url,
           language: languages?.[0] || repo.language || 'Unknown',
           languages,
           pushedAt: repo.pushedAt,
