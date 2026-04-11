@@ -606,20 +606,39 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	client := &http.Client{Timeout: 12 * time.Second}
 	profileURL := "https://tryhackme.com/api/v2/public-profile?username=" + url.QueryEscape(a.thmUser)
 	profileData, profileErr := a.fetchTHMJSON(client, profileURL)
+	profileRooms := extractTHMRoomNames(profileData)
+	profileRoomsCount, _ := extractTHMRoomCount(profileData)
+
+	canUsePrivateTHMEndpoints := a.hasTHMAuthSession()
 
 	skillsURL := fmt.Sprintf(
 		"https://tryhackme.com/api/v2/users/skills?role=%s&segment=%s",
 		url.QueryEscape(a.thmSkillsRole),
 		url.QueryEscape(a.thmSkillsSegment),
 	)
-	skillsData, skillsErr := a.fetchTHMJSON(client, skillsURL)
+	var skillsData any
+	var skillsErr error
+	if canUsePrivateTHMEndpoints {
+		skillsData, skillsErr = a.fetchTHMJSON(client, skillsURL)
+	} else {
+		skillsErr = fmt.Errorf("TryHackMe skills endpoint requires THM_COOKIE or THM_SESSION; using public profile data only")
+	}
 	normalizedSkills := normalizeTHMSkills(skillsData)
 
-	completedRooms, completedRoomsCount, roomsErr := a.fetchTHMCompletedRooms(client)
-	profileRooms := extractTHMRoomNames(profileData)
-	completedRooms = mergeUniqueStrings(completedRooms, profileRooms)
-	if profileRoomCount, ok := extractTHMRoomCount(profileData); ok && profileRoomCount > completedRoomsCount {
-		completedRoomsCount = profileRoomCount
+	completedRooms := append([]string(nil), profileRooms...)
+	completedRoomsCount := profileRoomsCount
+	completedRoomsSource := "public-profile"
+	var roomsErr error
+	if canUsePrivateTHMEndpoints {
+		fetchedRooms, fetchedRoomsCount, fetchErr := a.fetchTHMCompletedRooms(client)
+		roomsErr = fetchErr
+		completedRooms = mergeUniqueStrings(fetchedRooms, completedRooms)
+		if fetchedRoomsCount > completedRoomsCount {
+			completedRoomsCount = fetchedRoomsCount
+		}
+		completedRoomsSource = "/api/all-completed-rooms"
+	} else if len(completedRooms) == 0 {
+		roomsErr = fmt.Errorf("TryHackMe rooms endpoints require THM_COOKIE or THM_SESSION; no public room list was available")
 	}
 	if completedRoomsCount < len(completedRooms) {
 		completedRoomsCount = len(completedRooms)
@@ -648,7 +667,7 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 		"skillsMatrix":         normalizedSkills,
 		"completedRooms":       completedRooms,
 		"completedRoomsCount":  completedRoomsCount,
-		"completedRoomsSource": "/api/all-completed-rooms",
+		"completedRoomsSource": completedRoomsSource,
 	}
 	if profileErr != nil {
 		payload["profileError"] = profileErr.Error()
@@ -665,6 +684,10 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	response := map[string]any{"enabled": true, "data": payload}
 	a.cacheTHMResponse(response)
 	respondJSON(w, response)
+}
+
+func (a *App) hasTHMAuthSession() bool {
+	return strings.TrimSpace(a.thmCookieHeader()) != ""
 }
 
 func (a *App) cacheTHMResponse(payload any) {
