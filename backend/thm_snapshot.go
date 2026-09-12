@@ -261,8 +261,13 @@ func (a *App) handleAdminTHMSnapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) thmSnapshotMeta(snap *THMSnapshot) map[string]any {
+	storage := "json-file (lost on redeploy — set MONGODB_URI)"
+	if a.mongoStore != nil {
+		storage = "mongodb"
+	}
 	meta := map[string]any{
 		"hasSnapshot": snap != nil,
+		"storage":     storage,
 		"username":    a.thmUser,
 		"endpoints": map[string]string{
 			"profile": "https://tryhackme.com/api/v2/public-profile?username=" + a.thmUser,

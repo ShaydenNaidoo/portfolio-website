@@ -2860,6 +2860,14 @@ function App() {
                           Open each endpoint in a new tab, copy the JSON, paste it below and save. Blank fields keep the previous snapshot.
                           For rooms you can paste several pages one after another.
                         </p>
+                        {thmSyncMeta && (
+                          <p className="mission-meta" style={{ margin: '8px 0 4px' }}>
+                            {thmSyncMeta.hasSnapshot
+                              ? `Snapshot: ${thmSyncMeta.source} · ${formatDate(thmSyncMeta.updatedAt)} · ${thmSyncMeta.skillsTracked ?? 0} skills · ${thmSyncMeta.roomsStored ?? 0} rooms`
+                              : 'No snapshot stored yet.'}
+                            {thmSyncMeta.storage && ` · storage: ${thmSyncMeta.storage}`}
+                          </p>
+                        )}
                         {thmSyncMeta?.roomsPages?.length > 0 && (
                           <p className="mission-meta" style={{ marginTop: 8 }}>
                             Rooms come 16 per page — open each page, copy the JSON and paste them all into the rooms box, one after another:{' '}
