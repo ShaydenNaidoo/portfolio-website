@@ -1031,19 +1031,23 @@ function ProjectCard({ project, index, featured }) {
   )
 }
 
+// Per-screen art at /assets/menus/<screen>.<ext>; tries jpg, jpeg then png.
+const MENU_ART_EXTENSIONS = ['jpg', 'jpeg', 'png']
+
 function MenuArt({ id, src, onReady }) {
-  const [broken, setBroken] = useState(false)
-  if (broken) {
+  const [attempt, setAttempt] = useState(0)
+  if (attempt >= MENU_ART_EXTENSIONS.length) {
     return null
   }
+  const base = src.replace(/\.[a-z0-9]+$/i, '')
   return (
     <img
       className="menu-art"
       id={`art-${id}`}
-      src={src}
+      src={`${base}.${MENU_ART_EXTENSIONS[attempt]}`}
       alt=""
       onLoad={() => onReady(id)}
-      onError={() => setBroken(true)}
+      onError={() => setAttempt((current) => current + 1)}
     />
   )
 }
