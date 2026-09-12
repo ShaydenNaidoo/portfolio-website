@@ -632,6 +632,15 @@ body.has-art-home #big-name .ch:not(.box):not(.boxw){
 .img-preview{margin:14px 0;max-width:320px;}
 .img-preview img{width:100%;display:block;border:3px solid var(--black);}
 
+.skill-picks{display:flex;flex-wrap:wrap;gap:8px;}
+.skill-pick{
+  display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+  font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  background:#fff;color:var(--ink);border:3px solid var(--black);padding:6px 10px;transform:skewX(-8deg);
+}
+.skill-pick input{accent-color:var(--red);}
+.skill-pick.on{background:var(--black);color:var(--white);}
+
 /* ============ BLOG ============ */
 .blog-card .thumb img{filter:none;}
 .blog-card .byline{

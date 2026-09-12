@@ -14,12 +14,13 @@ import (
 )
 
 type MongoStore struct {
-	client      *mongo.Client
-	database    *mongo.Database
-	blogPosts   *mongo.Collection
-	missions    *mongo.Collection
-	moduleState *mongo.Collection
-	thmSnapshot *mongo.Collection
+	client         *mongo.Client
+	database       *mongo.Database
+	blogPosts      *mongo.Collection
+	missions       *mongo.Collection
+	moduleState    *mongo.Collection
+	thmSnapshot    *mongo.Collection
+	thmManualRooms *mongo.Collection
 }
 
 func (a *App) initMongoStoreFromEnv() {
@@ -56,12 +57,13 @@ func newMongoStore(uri string, databaseName string) (*MongoStore, error) {
 
 	database := client.Database(databaseName)
 	store := &MongoStore{
-		client:      client,
-		database:    database,
-		blogPosts:   database.Collection("blog_posts"),
-		missions:    database.Collection("missions"),
-		moduleState: database.Collection("module_progress"),
-		thmSnapshot: database.Collection("thm_snapshot"),
+		client:         client,
+		database:       database,
+		blogPosts:      database.Collection("blog_posts"),
+		missions:       database.Collection("missions"),
+		moduleState:    database.Collection("module_progress"),
+		thmSnapshot:    database.Collection("thm_snapshot"),
+		thmManualRooms: database.Collection("thm_manual_rooms"),
 	}
 
 	if err := store.ensureIndexes(ctx); err != nil {

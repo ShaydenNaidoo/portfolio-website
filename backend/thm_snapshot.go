@@ -250,11 +250,7 @@ func (a *App) handleAdminTHMSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Drop the response cache so the new data is served immediately.
-	a.mu.Lock()
-	a.thmCacheBody = nil
-	a.thmCacheExpiresAt = time.Time{}
-	a.mu.Unlock()
+	a.invalidateTHMCache()
 
 	snap, _ := a.loadTHMSnapshot()
 	meta := a.thmSnapshotMeta(snap)

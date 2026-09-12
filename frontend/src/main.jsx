@@ -1159,6 +1159,10 @@ function App() {
   const [thmSyncForm, setThmSyncForm] = useState({ profile: '', skills: '', rooms: '' })
   const [thmSyncBusy, setThmSyncBusy] = useState(false)
   const [thmSyncNotice, setThmSyncNotice] = useState('')
+  const [manualRooms, setManualRooms] = useState([])
+  const [roomForm, setRoomForm] = useState({ url: '', name: '', skills: [], boost: 5 })
+  const [roomBusy, setRoomBusy] = useState(false)
+  const [roomNotice, setRoomNotice] = useState('')
   const reducedMotion = useReducedMotion()
   const clock = useClock()
   const routeRef = useRef(route)
@@ -2074,11 +2078,100 @@ function App() {
     }
   }
 
+  const loadManualRooms = async () => {
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      return
+    }
+    try {
+      const response = await fetch(`${API}/api/admin/tryhackme/rooms`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (response.ok) {
+        const payload = await response.json()
+        setManualRooms(Array.isArray(payload?.rooms) ? payload.rooms : [])
+      }
+    } catch {
+      // panel still renders without the list
+    }
+  }
+
   useEffect(() => {
     if (route === 'missions' && isAdminAuthenticated) {
       loadThmSyncMeta()
+      loadManualRooms()
     }
   }, [route, isAdminAuthenticated])
+
+  const handleAddManualRoom = async (event) => {
+    event.preventDefault()
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      setRoomNotice('Login is required.')
+      return
+    }
+    if (!roomForm.url.trim()) {
+      setRoomNotice('Paste the room share link first.')
+      return
+    }
+    setRoomBusy(true)
+    setRoomNotice('')
+    try {
+      const response = await fetch(`${API}/api/admin/tryhackme/rooms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          url: roomForm.url.trim(),
+          name: roomForm.name.trim(),
+          skills: roomForm.skills,
+          boost: Number(roomForm.boost) || 5
+        })
+      })
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response, 'Could not add room.'))
+      }
+      const payload = await response.json()
+      setManualRooms(Array.isArray(payload?.rooms) ? payload.rooms : [])
+      setRoomNotice(`${payload.status === 'updated' ? 'Updated' : 'Added'} “${payload.room?.name}”.`)
+      setRoomForm({ url: '', name: '', skills: [], boost: 5 })
+      setThmResponse(null)
+      playSelect()
+    } catch (roomError) {
+      setRoomNotice(roomError.message || 'Could not add room.')
+    } finally {
+      setRoomBusy(false)
+    }
+  }
+
+  const handleDeleteManualRoom = async (code) => {
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      return
+    }
+    setRoomBusy(true)
+    try {
+      const response = await fetch(`${API}/api/admin/tryhackme/rooms/${encodeURIComponent(code)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response, 'Could not remove room.'))
+      }
+      const payload = await response.json()
+      setManualRooms(Array.isArray(payload?.rooms) ? payload.rooms : [])
+      setRoomNotice('Room removed.')
+      setThmResponse(null)
+    } catch (roomError) {
+      setRoomNotice(roomError.message || 'Could not remove room.')
+    } finally {
+      setRoomBusy(false)
+    }
+  }
+
+  const toggleRoomSkill = (skill) => setRoomForm((current) => ({
+    ...current,
+    skills: current.skills.includes(skill) ? current.skills.filter((item) => item !== skill) : [...current.skills, skill]
+  }))
 
   const handleThmSync = async (event) => {
     event.preventDefault()
@@ -2797,6 +2890,86 @@ function App() {
                           </button>
                           {thmSyncNotice && <div className="form-status" role="status">{thmSyncNotice}</div>}
                         </div>
+                      </form>
+
+                      <form className="paper" onSubmit={handleAddManualRoom}>
+                        <div className="form-head">Private rooms</div>
+                        <p>
+                          Rooms that are private don't show on your public profile. Paste the “share your achievement” link,
+                          tick the skills the room trained, and it will be added to your completed rooms and boost those
+                          skills in the matrix.
+                        </p>
+                        <label className="field">
+                          <span>Share link or room URL</span>
+                          <input
+                            type="text"
+                            placeholder="https://tryhackme.com/room/…"
+                            value={roomForm.url}
+                            onChange={(event) => setRoomForm((current) => ({ ...current, url: event.target.value }))}
+                          />
+                        </label>
+                        <div className="field-row">
+                          <label className="field">
+                            <span>Display name (optional)</span>
+                            <input
+                              type="text"
+                              maxLength={120}
+                              placeholder="Auto from the link"
+                              value={roomForm.name}
+                              onChange={(event) => setRoomForm((current) => ({ ...current, name: event.target.value }))}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Skill boost per category (1–25)</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="25"
+                              value={roomForm.boost}
+                              onChange={(event) => setRoomForm((current) => ({ ...current, boost: event.target.value }))}
+                            />
+                          </label>
+                        </div>
+                        <div className="field">
+                          <span>Skills trained</span>
+                          <div className="skill-picks">
+                            {THM_SKILL_ORDER.map((skill) => (
+                              <label key={skill} className={`skill-pick${roomForm.skills.includes(skill) ? ' on' : ''}`}>
+                                <input type="checkbox" checked={roomForm.skills.includes(skill)} onChange={() => toggleRoomSkill(skill)} />
+                                {skill}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="form-foot">
+                          <button type="submit" className="cv-btn small" disabled={roomBusy}>
+                            <span>{roomBusy ? 'Saving…' : 'Add room ➤'}</span>
+                          </button>
+                          {roomNotice && <div className="form-status" role="status">{roomNotice}</div>}
+                        </div>
+                        {manualRooms.length > 0 && (
+                          <ul className="mission-list" style={{ marginTop: 18 }}>
+                            {manualRooms.map((room) => (
+                              <li key={room.code} className="mission-item">
+                                <div>
+                                  <a href={room.url} target="_blank" rel="noreferrer">{room.name}</a>
+                                  <p className="mission-meta">
+                                    {room.skills?.length ? `${room.skills.join(' · ')} · +${room.boost}` : 'No skills selected'}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="mission-delete"
+                                  disabled={roomBusy}
+                                  onClick={() => handleDeleteManualRoom(room.code)}
+                                  aria-label={`Remove ${room.name}`}
+                                >
+                                  Remove
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </form>
 
                       <section className="paper">

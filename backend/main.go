@@ -197,6 +197,8 @@ func main() {
 	mux.HandleFunc("/api/admin/mission-control", app.handleAdminMissionControl)
 	mux.HandleFunc("/api/admin/mission-control/", app.handleAdminMissionControlSubroute)
 	mux.HandleFunc("/api/admin/tryhackme/snapshot", app.handleAdminTHMSnapshot)
+	mux.HandleFunc("/api/admin/tryhackme/rooms", app.handleAdminTHMManualRooms)
+	mux.HandleFunc("/api/admin/tryhackme/rooms/", app.handleAdminTHMManualRooms)
 	mux.HandleFunc("/api/tryhackme", app.handleTHM)
 	mux.HandleFunc("/webhooks/github", app.handleGitHubWebhook)
 
@@ -694,6 +696,7 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	if profileErr == nil {
 		_ = a.saveTHMSnapshot(payload, "live")
 	}
+	a.applyTHMManualRooms(payload)
 
 	response := map[string]any{"enabled": true, "data": payload}
 	if len(stale) > 0 {
@@ -1102,6 +1105,11 @@ func looksLikeRoomCollectionKey(key string) bool {
 		return false
 	}
 	if n == "rooms" || n == "room" {
+		return true
+	}
+	// Generic pagination containers used by the v2 endpoints.
+	switch n {
+	case "docs", "items", "results", "entries", "list", "data":
 		return true
 	}
 	if strings.Contains(n, "completedroom") || strings.Contains(n, "roomscompleted") || strings.Contains(n, "allcompletedroom") {
