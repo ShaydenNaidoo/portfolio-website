@@ -44,7 +44,7 @@ between screens, tilted "paper" cards, per-screen menu artwork, an animated spri
 - Screens: `#/` (home menu), `#/projects`, `#/skills`, `#/about`, `#/cv`, `#/blog`, `#/contact`, `#/missions` (admin only).
 - Controls: `↑ / ↓` select · `Enter` confirm · `Esc` back · click the name to go home.
 - Admin login lives on the **Contact** screen ("Phantom access"); once signed in, **MISSIONS** appears on the home menu.
-- Per-screen art: `frontend/public/assets/menus/<screen>.jpg` (`home`, `projects`, `skills`, `about`, `contact`). A missing file falls back to the CSS stripes.
+- Per-screen art: `frontend/src/assets/menus/<screen>.jpg|.jpeg|.png` (`home`, `projects`, `skills`, `about`, `contact`). Vite bundles whatever exists with a content hash (replace a file and rebuild — no stale caches); a missing screen falls back to the CSS stripes.
 - Cursor sprites: `frontend/public/assets/cursors/{normal,link}.png` (30-frame strips) · SFX: `frontend/public/assets/sfx/select.mp3`.
 - Contact form: set `CONTACT_EMAIL` in `frontend/src/main.jsx` to enable the formsubmit.co message form.
 - Theme colours are CSS variables at the top of `frontend/src/styles.css`.

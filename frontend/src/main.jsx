@@ -922,13 +922,13 @@ function SkillRadar({ skills }) {
 const GITHUB_FALLBACK = 'https://github.com/ShaydenNaidoo'
 const CONTACT_EMAIL = '' // set to enable the "send me a message" relay form (formsubmit.co)
 const SELECT_SFX = '/assets/sfx/select.mp3'
-const MENU_ART = {
-  home: '/assets/menus/home.jpg',
-  projects: '/assets/menus/projects.jpg',
-  skills: '/assets/menus/skills.jpg',
-  about: '/assets/menus/about.jpg',
-  contact: '/assets/menus/contact.jpg'
-}
+// Per-screen background art: drop home/projects/skills/about/contact
+// .jpg/.jpeg/.png into src/assets/menus. Vite bundles whatever exists, with a
+// content hash, so a replaced image can never be served stale.
+const MENU_ART = Object.fromEntries(
+  Object.entries(import.meta.glob('./assets/menus/*.{jpg,jpeg,png}', { eager: true, query: '?url', import: 'default' }))
+    .map(([path, url]) => [path.replace(/^.*\/([^/]+)\.[a-z0-9]+$/i, '$1').toLowerCase(), url])
+)
 const LANG_COLORS = {
   JavaScript: '#f1e05a', TypeScript: '#3178c6', Python: '#3572A5', Go: '#00ADD8',
   PHP: '#4F5D95', CSS: '#663399', HTML: '#e34c26', Shell: '#89e051', Bash: '#89e051',
@@ -1031,23 +1031,19 @@ function ProjectCard({ project, index, featured }) {
   )
 }
 
-// Per-screen art at /assets/menus/<screen>.<ext>; tries jpg, jpeg then png.
-const MENU_ART_EXTENSIONS = ['jpg', 'jpeg', 'png']
-
 function MenuArt({ id, src, onReady }) {
-  const [attempt, setAttempt] = useState(0)
-  if (attempt >= MENU_ART_EXTENSIONS.length) {
+  const [broken, setBroken] = useState(false)
+  if (broken) {
     return null
   }
-  const base = src.replace(/\.[a-z0-9]+$/i, '')
   return (
     <img
       className="menu-art"
       id={`art-${id}`}
-      src={`${base}.${MENU_ART_EXTENSIONS[attempt]}`}
+      src={src}
       alt=""
       onLoad={() => onReady(id)}
-      onError={() => setAttempt((current) => current + 1)}
+      onError={() => setBroken(true)}
     />
   )
 }
