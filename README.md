@@ -35,6 +35,20 @@ This repo now includes a production-ready portfolio stack:
    - Academic module progress calculators seeded from study-guide assessment formulas
    - Persisted data in `backend/data/admin_mission_control.json`
 
+## Frontend UI (Persona 5 menu style)
+
+The React frontend is a port of the [persona5-style-portfolio](https://github.com/Omicron69/persona5-style-portfolio)
+design: a keyboard-driven main menu with ransom-note lettering, a skewed three-pane wipe
+between screens, tilted "paper" cards, per-screen menu artwork, an animated sprite cursor and a select SFX.
+
+- Screens: `#/` (home menu), `#/projects`, `#/skills`, `#/about`, `#/cv`, `#/blog`, `#/contact`, `#/missions` (admin only).
+- Controls: `↑ / ↓` select · `Enter` confirm · `Esc` back · click the name to go home.
+- Admin login lives on the **Contact** screen ("Phantom access"); once signed in, **MISSIONS** appears on the home menu.
+- Per-screen art: `frontend/public/assets/menus/<screen>.jpg` (`home`, `projects`, `skills`, `about`, `contact`). A missing file falls back to the CSS stripes.
+- Cursor sprites: `frontend/public/assets/cursors/{normal,link}.png` (30-frame strips) · SFX: `frontend/public/assets/sfx/select.mp3`.
+- Contact form: set `CONTACT_EMAIL` in `frontend/src/main.jsx` to enable the formsubmit.co message form.
+- Theme colours are CSS variables at the top of `frontend/src/styles.css`.
+
 ## Quick start
 
 ### 1) Backend

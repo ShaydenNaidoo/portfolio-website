@@ -7,8 +7,6 @@ const ADMIN_TOKEN_STORAGE_KEY = 'portfolio_admin_token'
 const PROJECT_IMAGE = '/assets/project-fallback.jpeg'
 const GREEN_CART_IMAGE = '/assets/project-art/COS301.jpg'
 const PROJECT_ART_BASE = '/assets/project-art'
-const HERO_VIDEO = '/assets/persona-stars-loop.mp4'
-const HERO_POSTER = '/assets/cover-photo.jpg'
 const PROFILE_IMAGE = '/assets/profile-photo.jpeg'
 const CV_PDF = '/assets/shayden-naidoo-cv.pdf'
 const LINKEDIN_FALLBACK = 'https://www.linkedin.com/in/shayden-naidoo-b0a51b28b/'
@@ -104,26 +102,22 @@ const projectImageFor = (projectName, fallbackImage = PROJECT_IMAGE) => {
   return fallbackImage || PROJECT_IMAGE
 }
 
+const SCREENS = ['home', 'projects', 'skills', 'about', 'cv', 'blog', 'contact', 'missions']
+const MENU_ITEMS = [
+  { id: 'projects', label: 'PROJECTS' },
+  { id: 'skills', label: 'SKILLS' },
+  { id: 'about', label: 'ABOUT' },
+  { id: 'blog', label: 'BLOG' },
+  { id: 'contact', label: 'CONTACT' }
+]
+const ADMIN_MENU_ITEM = { id: 'missions', label: 'MISSIONS' }
+
 const parseRouteFromHash = () => {
   const normalized = window.location.hash.replace(/^#\/?/, '').toLowerCase()
-  if (normalized === 'cv' || normalized === 'blog' || normalized === 'missions') {
-    return normalized
-  }
-  return 'home'
+  return SCREENS.includes(normalized) ? normalized : 'home'
 }
 
-const routeHash = (route) => {
-  if (route === 'cv') {
-    return '#/cv'
-  }
-  if (route === 'blog') {
-    return '#/blog'
-  }
-  if (route === 'missions') {
-    return '#/missions'
-  }
-  return '#/'
-}
+const routeHash = (route) => (route === 'home' ? '#/' : `#/${route}`)
 
 const pickDeep = (input, matcher) => {
   const queue = [input]
@@ -806,7 +800,7 @@ function LanguageIcon({ language }) {
       return (
         <svg viewBox="0 0 20 20" role="img" aria-label="Code icon">
           <rect x="1.3" y="1.3" width="17.4" height="17.4" fill="#232323" stroke="#e8e8e8" strokeWidth="1.3" />
-          <text x="10" y="12.7" textAnchor="middle" fontSize="7.1" fontWeight="700" fill="#f4bc11">{'</>'}</text>
+          <text x="10" y="12.7" textAnchor="middle" fontSize="7.1" fontWeight="700" fill="#e60012">{'</>'}</text>
         </svg>
       )
   }
@@ -842,13 +836,13 @@ function SkillRadar({ skills }) {
   })
 
   return (
-    <svg viewBox="0 0 420 420" aria-label="TryHackMe skills radar chart" role="img" className="thm-radar-svg">
+    <svg viewBox="-70 -14 560 448" aria-label="TryHackMe skills radar chart" role="img" className="thm-radar-svg">
       {Array.from({ length: rings }, (_, ringIndex) => ringIndex + 1).map((ring) => (
         <polygon
           key={`ring-${ring}`}
           points={ringPoints(ring / rings)}
           fill="none"
-          stroke={ring === rings ? '#4a4a4a' : '#2e2e2e'}
+          stroke={ring === rings ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.18)'}
           strokeWidth={ring === rings ? 2.6 : 1.1}
         />
       ))}
@@ -862,7 +856,7 @@ function SkillRadar({ skills }) {
             y1={center}
             x2={edge.x}
             y2={edge.y}
-            stroke="rgba(188,188,188,0.24)"
+            stroke="rgba(255,255,255,0.22)"
             strokeDasharray="4 5"
             strokeWidth="1"
           />
@@ -871,8 +865,8 @@ function SkillRadar({ skills }) {
 
       <polygon
         points={graphPoints.map((point) => `${point.x},${point.y}`).join(' ')}
-        fill="rgba(244,188,17,0.42)"
-        stroke="#ffd96a"
+        fill="rgba(230,0,18,0.55)"
+        stroke="#f6f4ef"
         strokeWidth="2.8"
       />
 
@@ -882,8 +876,8 @@ function SkillRadar({ skills }) {
           cx={point.x}
           cy={point.y}
           r="3.4"
-          fill="#f4bc11"
-          stroke="#a17100"
+          fill="#e60012"
+          stroke="#f6f4ef"
           strokeWidth="1.1"
         />
       ))}
@@ -920,13 +914,383 @@ function SkillRadar({ skills }) {
   )
 }
 
+
+/* =====================================================================
+   Persona-5 menu UI helpers: ransom lettering, ambient hooks, cards
+   ===================================================================== */
+
+const GITHUB_FALLBACK = 'https://github.com/ShaydenNaidoo'
+const CONTACT_EMAIL = '' // set to enable the "send me a message" relay form (formsubmit.co)
+const SELECT_SFX = '/assets/sfx/select.mp3'
+const MENU_ART = {
+  home: '/assets/menus/home.jpg',
+  projects: '/assets/menus/projects.jpg',
+  skills: '/assets/menus/skills.jpg',
+  about: '/assets/menus/about.jpg',
+  contact: '/assets/menus/contact.jpg'
+}
+const LANG_COLORS = {
+  JavaScript: '#f1e05a', TypeScript: '#3178c6', Python: '#3572A5', Go: '#00ADD8',
+  PHP: '#4F5D95', CSS: '#663399', HTML: '#e34c26', Shell: '#89e051', Bash: '#89e051',
+  'Jupyter Notebook': '#DA5B0B', Java: '#b07219', C: '#555', 'C++': '#f34b7d',
+  Assembly: '#6E4C13', Pascal: '#E3F171', Prolog: '#74283c', Scheme: '#1e4aec', SQL: '#e38c00'
+}
+
+// Deterministic pseudo-random hash (so letters look the same every visit)
+const hashString = (str) => {
+  let h = 9
+  for (let i = 0; i < str.length; i += 1) {
+    h = Math.imul(h ^ str.charCodeAt(i), 387420489)
+  }
+  return (h ^ (h >>> 9)) >>> 0
+}
+
+const tiltFor = (name) => `${((hashString(String(name)) % 5) - 2) * 0.8}deg`
+
+// Split "Green Cart" so the first word renders red
+const splitTitle = (title) => {
+  const text = String(title || '')
+  const first = text.split(' ')[0]
+  return (
+    <>
+      <em>{first}</em>{text.slice(first.length)}
+    </>
+  )
+}
+
+const shortNote = (text, max = 160) => {
+  const clean = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  return clean.length > max ? `${clean.slice(0, max)}…` : clean
+}
+
+const prettyName = (name) => String(name || '')
+  .replace(/[-_]/g, ' ')
+  .replace(/\b\w/g, (c) => c.toUpperCase())
+
+const useReducedMotion = () => useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, [])
+
+function Ransom({ text, className = '' }) {
+  const letters = useMemo(() => [...String(text || '')].map((c, i) => {
+    const h = hashString(text + i)
+    const rot = (h % 17) - 8
+    const scale = 0.86 + ((h >> 3) % 30) / 100
+    const dy = ((h >> 5) % 9) - 4
+    const variant = (h >> 7) % 10
+    const cls = variant === 0 ? ' box' : variant === 1 ? ' boxw' : variant === 2 ? ' red' : ''
+    return { c: c === ' ' ? ' ' : c, t: `rotate(${rot}deg) scale(${scale}) translateY(${dy}px)`, cls, key: i }
+  }), [text])
+
+  return (
+    <span className={`ransom ${className}`.trim()}>
+      {letters.map((l) => (
+        <span key={l.key} className={`ch display${l.cls}`} style={{ '--t': l.t, transform: l.t }}>{l.c}</span>
+      ))}
+    </span>
+  )
+}
+
+function Thumb({ src, alt = '' }) {
+  const [broken, setBroken] = useState(false)
+  if (!src || broken) {
+    return null
+  }
+  return (
+    <div className="thumb">
+      <img src={src} alt={alt} loading="lazy" onError={() => setBroken(true)} />
+    </div>
+  )
+}
+
+function ProjectCard({ project, index, featured }) {
+  const languages = projectLanguagesFor(project)
+  const primary = languages[0] || project.language || 'Repo'
+  return (
+    <a
+      className={`card${featured ? ' feat' : ''}`}
+      href={project.url || '#'}
+      target="_blank"
+      rel="noreferrer"
+      style={{ '--tilt': tiltFor(project.name), '--d': `${index * 70}ms`, '--lc': LANG_COLORS[primary] || '#e60012' }}
+    >
+      <Thumb src={project.image} />
+      <span className="lang">{primary}</span>
+      <h3>{splitTitle(prettyName(project.name))}</h3>
+      <p>{project.description}</p>
+      {languages.length > 1 && (
+        <div className="langs">
+          {languages.map((language) => (
+            <span key={language}><LanguageIcon language={language} />{language}</span>
+          ))}
+        </div>
+      )}
+      <div className="meta">
+        <span>{featured ? 'HIGHLIGHT' : project.pushedAt ? `Updated ${formatDate(project.pushedAt)}` : `★ ${project.stars || 0}`}</span>
+        <span className="go">View on GitHub →</span>
+      </div>
+    </a>
+  )
+}
+
+function MenuArt({ id, src, onReady }) {
+  const [broken, setBroken] = useState(false)
+  if (broken) {
+    return null
+  }
+  return (
+    <img
+      className="menu-art"
+      id={`art-${id}`}
+      src={src}
+      alt=""
+      onLoad={() => onReady(id)}
+      onError={() => setBroken(true)}
+    />
+  )
+}
+
+function useClock() {
+  const [time, setTime] = useState('')
+  useEffect(() => {
+    const tick = () => setTime(`${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · PTA`)
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [])
+  return time
+}
+
+// Mouse parallax on the background layers, same easing as the reference
+function useParallax(bgRef, reduced) {
+  useEffect(() => {
+    if (reduced || !bgRef.current) {
+      return undefined
+    }
+    const stripes = bgRef.current.querySelector('#bg-stripes')
+    const halftone = bgRef.current.querySelector('#bg-halftone')
+    let tx = 0
+    let ty = 0
+    let cx = 0
+    let cy = 0
+    let raf = 0
+    const onMove = (e) => {
+      tx = e.clientX / window.innerWidth - 0.5
+      ty = e.clientY / window.innerHeight - 0.5
+    }
+    window.addEventListener('mousemove', onMove, { passive: true })
+    const loop = () => {
+      cx += (tx - cx) * 0.06
+      cy += (ty - cy) * 0.06
+      stripes.style.transform = `translate(${cx * 22}px, ${cy * 14}px)`
+      halftone.style.transform = `translate(${cx * -34}px, ${cy * -22}px)`
+      bgRef.current?.querySelectorAll('.menu-art').forEach((a) => {
+        a.style.transform = `translate(${cx * 14}px, ${cy * 9}px) scale(1.04)`
+      })
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('mousemove', onMove)
+    }
+  }, [bgRef, reduced])
+}
+
+// 30-frame sprite-strip cursor (50ms per frame, like the original .ani)
+function useSpriteCursor(cursorRef, reduced) {
+  useEffect(() => {
+    if (!window.matchMedia('(pointer:fine)').matches || reduced || !cursorRef.current) {
+      return undefined
+    }
+    const cur = cursorRef.current
+    document.body.classList.add('cursor-on')
+    let x = -100
+    let y = -100
+    let frame = 0
+    let last = 0
+    let visible = false
+    let raf = 0
+
+    const onMove = (e) => {
+      x = e.clientX
+      y = e.clientY
+      if (!visible) {
+        cur.style.display = 'block'
+        visible = true
+      }
+      const overLink = e.target.closest?.('a,button,label,input,select,textarea,.card,.menu-item,.back-hint,.contact-chip,.chip,#big-name')
+      cur.classList.toggle('link', Boolean(overLink))
+    }
+    const onLeave = () => {
+      cur.style.display = 'none'
+      visible = false
+    }
+    window.addEventListener('mousemove', onMove, { passive: true })
+    document.documentElement.addEventListener('mouseleave', onLeave)
+
+    const tick = (ts) => {
+      if (ts - last >= 50) {
+        frame = (frame + 1) % 30
+        last = ts
+        cur.style.backgroundPosition = `${-frame * 48}px 0`
+      }
+      cur.style.transform = `translate(${x}px, ${y}px)`
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('mousemove', onMove)
+      document.documentElement.removeEventListener('mouseleave', onLeave)
+      document.body.classList.remove('cursor-on')
+    }
+  }, [cursorRef, reduced])
+}
+
 function App() {
   const [route, setRoute] = useState(() => parseRouteFromHash())
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuIndex, setMenuIndex] = useState(0)
+  const [artReady, setArtReady] = useState({})
+  const [barsOn, setBarsOn] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [contactStatus, setContactStatus] = useState('')
+  const [contactBusy, setContactBusy] = useState(false)
+  const reducedMotion = useReducedMotion()
+  const clock = useClock()
+  const routeRef = useRef(route)
+  const menuIndexRef = useRef(0)
+  const transitioning = useRef(false)
+  const audioUnlocked = useRef(false)
+  const wipeRef = useRef(null)
+  const sfxRef = useRef(null)
+  const bgRef = useRef(null)
+  const cursorRef = useRef(null)
+  const goToRef = useRef(() => {})
+
+  useParallax(bgRef, reducedMotion)
+  useSpriteCursor(cursorRef, reducedMotion)
+
+  /* ---------- Sound (browsers block audio until first user gesture) ---------- */
+  const playSelect = () => {
+    if (!audioUnlocked.current || !sfxRef.current) {
+      return
+    }
+    try {
+      sfxRef.current.currentTime = 0
+      const p = sfxRef.current.play()
+      if (p && p.catch) {
+        p.catch(() => {})
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    const unlock = () => {
+      audioUnlocked.current = true
+    }
+    window.addEventListener('pointerdown', unlock, { once: true, capture: true })
+    window.addEventListener('keydown', unlock, { once: true, capture: true })
+    if (sfxRef.current) {
+      sfxRef.current.volume = 0.45
+    }
+    setLoaded(true)
+    return () => {
+      window.removeEventListener('pointerdown', unlock, { capture: true })
+      window.removeEventListener('keydown', unlock, { capture: true })
+    }
+  }, [])
+
+  /* ---------- Diagonal wipe; swap() runs mid-way while the screen is covered ---------- */
+  const wipe = (swap, done) => {
+    const w = wipeRef.current
+    if (reducedMotion || !w) {
+      swap()
+      done()
+      return
+    }
+    w.classList.remove('go')
+    void w.offsetWidth // restart animation
+    w.classList.add('go')
+    setTimeout(swap, 340)
+    setTimeout(done, 720)
+  }
+
+  const goTo = (screen) => {
+    if (transitioning.current || screen === routeRef.current) {
+      return
+    }
+    transitioning.current = true
+    playSelect()
+    wipe(
+      () => {
+        routeRef.current = screen
+        setRoute(screen)
+        const nextHash = routeHash(screen)
+        if (window.location.hash !== nextHash) {
+          window.location.hash = nextHash
+        }
+      },
+      () => {
+        transitioning.current = false
+      }
+    )
+  }
+  goToRef.current = goTo
+
+  useEffect(() => {
+    const sync = () => {
+      const next = parseRouteFromHash()
+      if (next === routeRef.current) {
+        return
+      }
+      if (transitioning.current) {
+        setTimeout(sync, 400)
+        return
+      }
+      goToRef.current(next)
+    }
+    window.addEventListener('hashchange', sync)
+    return () => window.removeEventListener('hashchange', sync)
+  }, [])
+
+  useEffect(() => {
+    document.body.dataset.screen = route
+    document.querySelector('#stage .screen.active')?.scrollTo?.(0, 0)
+  }, [route])
+
+  useEffect(() => {
+    Object.keys(MENU_ART).forEach((id) => {
+      document.body.classList.toggle(`has-art-${id}`, Boolean(artReady[id]))
+    })
+  }, [artReady])
+
+  // skill bars refill every time the Skills screen is shown
+  useEffect(() => {
+    if (route !== 'skills') {
+      setBarsOn(false)
+      return undefined
+    }
+    let raf = requestAnimationFrame(() => {
+      raf = requestAnimationFrame(() => setBarsOn(true))
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [route])
+
+  const selectMenu = (index, items) => {
+    const n = items.length
+    const next = ((index % n) + n) % n
+    if (next !== menuIndexRef.current) {
+      playSelect()
+    }
+    menuIndexRef.current = next
+    setMenuIndex(next)
+  }
+
   const [profile, setProfile] = useState(null)
   const [repos, setRepos] = useState([])
   const [thmResponse, setThmResponse] = useState(null)
-  const [selectedProject, setSelectedProject] = useState(0)
   const [loading, setLoading] = useState(route !== 'cv')
   const [error, setError] = useState('')
   const [adminToken, setAdminToken] = useState(() => window.localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || '')
@@ -956,8 +1320,6 @@ function App() {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
   })
-  const carouselRef = useRef(null)
-  const projectRefs = useRef([])
 
   const loadCoreData = async () => {
     setLoading(true)
@@ -1064,9 +1426,7 @@ function App() {
       setAdminUsername(String(payload?.username || username))
       setAdminNotice('Admin login successful.')
       setLoginForm({ username, password: '' })
-      setRoute('missions')
-      window.location.hash = routeHash('missions')
-      setMenuOpen(false)
+      goTo('missions')
       await loadMissionControl(token)
     } catch (authError) {
       setAdminNotice(authError.message || 'Login failed.')
@@ -1436,16 +1796,6 @@ function App() {
   }, [adminToken, route])
 
   useEffect(() => {
-    const syncRoute = () => {
-      setRoute(parseRouteFromHash())
-      setMenuOpen(false)
-    }
-
-    window.addEventListener('hashchange', syncRoute)
-    return () => window.removeEventListener('hashchange', syncRoute)
-  }, [])
-
-  useEffect(() => {
     if (route === 'cv' || profile) {
       return
     }
@@ -1499,16 +1849,6 @@ function App() {
     })
   }, [missionControl])
 
-  const navigateTo = (nextRoute) => {
-    const nextHash = routeHash(nextRoute)
-    if (window.location.hash !== nextHash) {
-      window.location.hash = nextHash
-    } else {
-      setRoute(nextRoute)
-    }
-    setMenuOpen(false)
-  }
-
   const projects = useMemo(() => {
     const curated = FEATURED_PROJECTS.map((project) => {
       const key = normalizeProjectKey(project.name)
@@ -1549,6 +1889,7 @@ function App() {
           language: languages?.[0] || repo.language || 'Unknown',
           languages,
           pushedAt: repo.pushedAt,
+          stars: repo.stars,
           image: projectImageFor(repo.name)
         }
       })
@@ -1582,22 +1923,6 @@ function App() {
     return merged
   }, [repos])
 
-  useEffect(() => {
-    if (selectedProject > projects.length - 1) {
-      setSelectedProject(0)
-    }
-  }, [projects, selectedProject])
-
-  useEffect(() => {
-    projectRefs.current[selectedProject]?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'nearest',
-      inline: 'center'
-    })
-  }, [selectedProject])
-
-  const selected = projects[selectedProject] || projects[0]
-  const selectedLanguages = useMemo(() => projectLanguagesFor(selected), [selected])
 
   const thmData = useMemo(() => unwrapTryHackMe(thmResponse), [thmResponse])
   const thmDisabled = Boolean(thmData?.__disabled)
@@ -1664,572 +1989,587 @@ function App() {
   )
   const calendarHeading = calendarCursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 
-  if (route !== 'cv' && loading && !profile) {
-    return <div className="loading">Loading...</div>
+  const menuItems = isAdminAuthenticated ? [...MENU_ITEMS, ADMIN_MENU_ITEM] : MENU_ITEMS
+  const menuItemsRef = useRef(menuItems)
+  menuItemsRef.current = menuItems
+
+  /* ---------- Keyboard: ↑↓ select · Enter confirm · Esc back ---------- */
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = e.target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+        return
+      }
+      if (routeRef.current === 'home') {
+        if (e.key === 'ArrowDown') {
+          selectMenu(menuIndexRef.current + 1, menuItemsRef.current)
+          e.preventDefault()
+        } else if (e.key === 'ArrowUp') {
+          selectMenu(menuIndexRef.current - 1, menuItemsRef.current)
+          e.preventDefault()
+        } else if (e.key === 'Enter') {
+          goToRef.current(menuItemsRef.current[menuIndexRef.current]?.id || 'projects')
+        }
+      } else if (e.key === 'Escape') {
+        goToRef.current('home')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const handleContactSubmit = async (event) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const data = Object.fromEntries(new FormData(form).entries())
+    if (data._honey) {
+      return
+    }
+    if (!String(data.name || '').trim() || !String(data.email || '').trim() || !String(data.message || '').trim()) {
+      setContactStatus('Fill in all three fields first.')
+      return
+    }
+    setContactBusy(true)
+    setContactStatus('Sending…')
+    try {
+      const res = await fetch(`https://formsubmit.co/ajax/${CONTACT_EMAIL}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ name: data.name, email: data.email, message: data.message, _subject: `Portfolio message from ${data.name}` })
+      })
+      if (!res.ok) {
+        throw new Error(String(res.status))
+      }
+      setContactStatus("Sent! I'll get back to you soon.")
+      form.reset()
+      playSelect()
+    } catch {
+      setContactStatus('Could not reach the relay, opening your email app instead…')
+      const subject = encodeURIComponent(`Portfolio message from ${data.name}`)
+      const body = encodeURIComponent(`${data.message}\n\nReply to: ${data.email}`)
+      window.location.href = `mailto:${CONTACT_EMAIL}?subject=${subject}&body=${body}`
+    } finally {
+      setContactBusy(false)
+    }
   }
 
+  const displayName = profile?.displayName || 'Shayden Naidoo'
+  const nameParts = displayName.toUpperCase().split(/\s+/).filter(Boolean)
+  const headline = profile?.headline || 'Cybersecurity & Software Engineering'
+  const bio = profile?.bio || 'Portfolio profile loading.'
+  const githubUrl = useMemo(() => {
+    const match = repos.map((repo) => String(repo?.url || '')).find((url) => /github\.com\/[^/]+\//.test(url))
+    return match ? match.replace(/(github\.com\/[^/]+).*/, '$1') : GITHUB_FALLBACK
+  }, [repos])
+  const thmProfileUrl = thmUsername ? `https://tryhackme.com/p/${encodeURIComponent(thmUsername)}` : ''
+  const featuredProjects = projects.slice(0, FEATURED_PROJECTS.length)
+  const repoProjects = projects.slice(FEATURED_PROJECTS.length)
+  const repoStatus = loading
+    ? 'Contacting GitHub…'
+    : error
+      ? 'Showing pinned work · GitHub API unavailable right now'
+      : `${repoProjects.length} repositories · live from GitHub`
+
   return (
-    <div className="app">
-      <div className="backdrop-pattern" aria-hidden="true" />
+    <>
+      {/* Background art layers */}
+      <div id="bg" aria-hidden="true" ref={bgRef}>
+        <div className="bg-layer" id="bg-stripes" />
+        <svg className="bg-star" style={{ left: '6%', top: '8%', width: '26vmax', height: '26vmax' }} viewBox="0 0 100 100">
+          <polygon points="50,0 60,35 98,35 68,57 78,94 50,72 22,94 32,57 2,35 40,35" fill="#000" />
+        </svg>
+        <svg className="bg-star s2" style={{ right: '4%', bottom: '6%', width: '34vmax', height: '34vmax' }} viewBox="0 0 100 100">
+          <polygon points="50,0 60,35 98,35 68,57 78,94 50,72 22,94 32,57 2,35 40,35" fill="#fff" />
+        </svg>
+        {Object.entries(MENU_ART).map(([id, src]) => (
+          <MenuArt key={id} id={id} src={src} onReady={(name) => setArtReady((current) => ({ ...current, [name]: true }))} />
+        ))}
+        <div className="bg-layer" id="bg-halftone" />
+        <div className="bg-layer" id="bg-vignette" />
+      </div>
+      <div id="slash" aria-hidden="true" />
 
-      <button
-        type="button"
-        className={`menu-overlay ${menuOpen ? 'is-open' : ''}`}
-        aria-label="Close menu"
-        onClick={() => setMenuOpen(false)}
-      />
-
-      <div className="menu-shell">
-        <button
-          type="button"
-          className={`menu-toggle ${menuOpen ? 'is-open' : ''}`}
-          aria-label="Open site menu"
-          aria-controls="site-menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((open) => !open)}
-        >
-          <span />
-          <span />
-          <span />
-        </button>
-
-        <nav id="site-menu" className={`menu-drawer ${menuOpen ? 'is-open' : ''}`} aria-label="Site sections">
-          <button
-            type="button"
-            className={`menu-link ${route === 'home' ? 'is-active' : ''}`}
-            onClick={() => navigateTo('home')}
-          >
-            Home
-          </button>
-          <button
-            type="button"
-            className={`menu-link ${route === 'cv' ? 'is-active' : ''}`}
-            onClick={() => navigateTo('cv')}
-          >
-            View CV
-          </button>
-          <button
-            type="button"
-            className={`menu-link ${route === 'blog' ? 'is-active' : ''}`}
-            onClick={() => navigateTo('blog')}
-          >
-            Blog Posts
-          </button>
-          {isAdminAuthenticated && (
-            <button
-              type="button"
-              className={`menu-link ${route === 'missions' ? 'is-active' : ''}`}
-              onClick={() => navigateTo('missions')}
-            >
-              Mission Control
-            </button>
-          )}
-
-          <section className="menu-admin">
-            <p className="menu-admin-title">Admin Access</p>
-
-            {isAdminAuthenticated ? (
-              <>
-                <p className="menu-admin-status">Signed in as {adminUsername}</p>
-                <button
-                  type="button"
-                  className="menu-link"
-                  onClick={() => navigateTo('blog')}
-                >
-                  Write Post
-                </button>
-                <button
-                  type="button"
-                  className="menu-link"
-                  onClick={() => navigateTo('missions')}
-                >
-                  Mission Control
-                </button>
-                <button
-                  type="button"
-                  className="menu-link menu-link-danger"
-                  onClick={handleAdminLogout}
-                >
-                  Log Out
-                </button>
-              </>
-            ) : (
-              <form className="menu-admin-form" onSubmit={handleAdminLogin}>
-                <input
-                  className="menu-admin-input"
-                  type="text"
-                  placeholder="Admin username"
-                  autoComplete="username"
-                  value={loginForm.username}
-                  onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))}
-                />
-                <input
-                  className="menu-admin-input"
-                  type="password"
-                  placeholder="Admin password"
-                  autoComplete="current-password"
-                  value={loginForm.password}
-                  onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
-                />
-                <button type="submit" className="menu-link" disabled={adminChecking}>
-                  {adminChecking ? 'Signing In...' : 'Admin Login'}
-                </button>
-              </form>
-            )}
-
-            {adminNotice && <p className="menu-admin-note">{adminNotice}</p>}
-          </section>
-        </nav>
+      {/* Screen transition wipe */}
+      <div id="wipe" aria-hidden="true" ref={wipeRef}>
+        <div className="pane p3" />
+        <div className="pane p2" />
+        <div className="pane p1" />
+        <div className="flash" />
       </div>
 
-      {route === 'home' ? (
-        <>
-          <header className="hero" id="top">
-            <div className="hero-banner">
-              <video className="hero-video" autoPlay muted loop playsInline preload="metadata" poster={HERO_POSTER}>
-                <source src={HERO_VIDEO} type="video/mp4" />
-              </video>
-              <div className="hero-scrim" />
-              <div className="hero-cutout" />
+      {/* Custom animated cursor + select sound */}
+      <div id="cursor" aria-hidden="true" ref={cursorRef} />
+      <audio ref={sfxRef} src={SELECT_SFX} preload="auto" />
+
+      <div id="shell" className={loaded ? 'loaded' : ''}>
+        <div id="hud-top">
+          <div className="hud-tag">Portfolio // {displayName}</div>
+          <div className="hud-tag alt">Pretoria · {headline}</div>
+        </div>
+
+        <div id="stage">
+
+          {/* HOME */}
+          <section className={`screen${route === 'home' ? ' active' : ''}`} id="screen-home" aria-label="Main menu">
+            <div id="intro-eyebrow">Take a look at my work</div>
+            <h1 id="big-name" onClick={() => (route === 'home' ? playSelect() : goTo('home'))}>
+              {nameParts.map((part, index) => <Ransom key={`${part}-${index}`} text={part} />)}
+            </h1>
+            <p id="tagline">
+              <strong>{headline}</strong>
+              {bio}
+            </p>
+            <nav id="menu" aria-label="Sections">
+              {menuItems.map((item, index) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`menu-item${index === menuIndex ? ' sel' : ''}`}
+                  onMouseEnter={() => selectMenu(index, menuItems)}
+                  onFocus={() => selectMenu(index, menuItems)}
+                  onClick={() => goTo(item.id)}
+                >
+                  <Ransom text={item.label} /><span className="cursor-mark">◀</span>
+                </button>
+              ))}
+            </nav>
+          </section>
+
+          {/* PROJECTS */}
+          <section className={`screen sub${route === 'projects' ? ' active' : ''}`} id="screen-projects" aria-label="Projects">
+            <div className="screen-head"><Ransom text="PROJECTS" /></div>
+            <button type="button" className="back-hint" onClick={() => goTo('home')}>ESC · Back</button>
+            <div className="grid-label"><span className="bar" />Featured</div>
+            <div id="feat-grid" className="grid">
+              {featuredProjects.map((project, index) => (
+                <ProjectCard key={`feat-${project.name}`} project={project} index={index} featured />
+              ))}
+            </div>
+            <div className="grid-label"><span className="bar" />All repositories</div>
+            <div id="repo-status">{repoStatus}</div>
+            <div id="repo-grid" className="grid">
+              {repoProjects.map((project, index) => (
+                <ProjectCard key={`repo-${project.name}`} project={project} index={index} />
+              ))}
+            </div>
+          </section>
+
+          {/* SKILLS */}
+          <section className={`screen sub${route === 'skills' ? ' active' : ''}`} id="screen-skills" aria-label="Skills">
+            <div className="screen-head"><Ransom text="SKILLS" /></div>
+            <button type="button" className="back-hint" onClick={() => goTo('home')}>ESC · Back</button>
+
+            <div className="skill-group">
+              <h3>Languages</h3>
+              <div className="chip-cloud">
+                {languages.map((lang) => (
+                  <span className="chip" key={lang} style={{ '--tilt': tiltFor(lang) }}>
+                    <LanguageIcon language={lang} />
+                    <span>{lang}</span>
+                  </span>
+                ))}
+                {!languages.length && <p className="note">Languages will appear once profile data loads.</p>}
+              </div>
             </div>
 
-            <div className="hero-content shell">
-              <img src={PROFILE_IMAGE} alt={profile?.displayName || 'Profile'} className="profile-photo" />
-
-              <div className="profile-block">
-                <p className="label-chip">Phantom Profile</p>
-                <h1>{profile?.displayName || 'Shayden Naidoo'}</h1>
-                <p className="headline">{profile?.headline || 'Cybersecurity and Software Engineering'}</p>
-                <p>{profile?.bio || 'Portfolio profile loading.'}</p>
-                <div className="profile-links">
-                  <a href={linkedInUrl} target="_blank" rel="noreferrer">LinkedIn Profile</a>
-                </div>
-              </div>
-            </div>
-          </header>
-
-          <main className="shell">
-            {error && <section className="panel warning-panel">Data load warning: {error}</section>}
-
-            <section className="panel projects-panel" id="projects">
-              <div className="panel-title-wrap">
-                <h2 className="panel-title">Missions</h2>
-              </div>
-              <p className="section-lead">Hover a card to lock target.</p>
-
-              <div className="carousel-wrap">
-                <button
-                  className="carousel-control"
-                  type="button"
-                  aria-label="Previous project"
-                  disabled={projects.length <= 1}
-                  onClick={() => setSelectedProject((prev) => (prev - 1 + projects.length) % projects.length)}
-                >
-                  &#10094;
-                </button>
-
-                <div className="projects-carousel" ref={carouselRef}>
-                  {projects.map((project, index) => (
-                    <button
-                      key={`${project.name}-${index}`}
-                      ref={(node) => {
-                        projectRefs.current[index] = node
-                      }}
-                      className={`project-card ${index === selectedProject ? 'is-selected' : ''}`}
-                      type="button"
-                      onMouseEnter={() => setSelectedProject(index)}
-                      onFocus={() => setSelectedProject(index)}
-                      onClick={() => setSelectedProject(index)}
-                      aria-label={`Select ${project.name}`}
-                    >
-                      <div className="project-image-frame">
-                        <img src={project.image} alt={project.name} loading="lazy" />
-                      </div>
-                      <div className="project-caption">
-                        <h3>{project.name}</h3>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  className="carousel-control"
-                  type="button"
-                  aria-label="Next project"
-                  disabled={projects.length <= 1}
-                  onClick={() => setSelectedProject((prev) => (prev + 1) % projects.length)}
-                >
-                  &#10095;
-                </button>
-              </div>
-
-              <article className="project-focus" aria-live="polite">
-                <div className="project-focus-image-frame">
-                  <img src={selected.image} alt={selected.name} />
-                </div>
-                <div className="project-focus-info">
-                  <p className="label-chip">Selected Mission</p>
-                  <h3>{selected.name}</h3>
-                  <p>{selected.description}</p>
-                  <div className="meta-row">
-                    <div className="meta-languages">
-                      <span className="meta-label">Languages:</span>
-                      <div className="project-language-list">
-                        {selectedLanguages.length ? selectedLanguages.map((language) => (
-                          <span key={language} className="project-language-chip">
-                            <span className="project-language-icon" aria-hidden="true">
-                              <LanguageIcon language={language} />
-                            </span>
-                            <span>{language}</span>
-                          </span>
-                        )) : <span className="meta-empty">Unknown</span>}
-                      </div>
-                    </div>
-                    <span className="meta-updated">Updated: {formatDate(selected.pushedAt)}</span>
-                  </div>
-                  <a href={selected.url || '#'} target="_blank" rel="noreferrer">Open Repository</a>
-                </div>
-              </article>
-            </section>
-
-            <section className="panel thm-panel" id="tryhackme">
-              <div className="panel-title-wrap">
-                <h2 className="panel-title">TryHackMe Intel</h2>
-              </div>
-
+            <div className="skill-group">
+              <h3>TryHackMe Intel</h3>
               {thmDisabled ? (
-                <p>{thmData.__message}</p>
+                <p className="note">{shortNote(thmData.__message)}</p>
               ) : (
-                <div className="thm-grid">
-                  <div className="thm-persona-card" aria-label="TryHackMe identity card">
-                    <div className="thm-persona-avatar">
-                      {thmAvatar ? (
-                        <img src={thmAvatar} alt={`${thmUsername || 'TryHackMe'} avatar`} loading="lazy" />
-                      ) : (
-                        <div className="thm-persona-avatar-fallback">{(thmUsername || 'T').slice(0, 1).toUpperCase()}</div>
-                      )}
-                    </div>
-                    <div className="thm-persona-main">
-                      <p className="thm-persona-ribbon">TryHackMe Profile</p>
-                      <p className="thm-persona-headline">
-                        <span className="thm-persona-name">{thmUsername || 'Unknown Operative'}</span>
-                        {thmTagLine && <span className="thm-persona-tags">{thmTagLine}</span>}
-                      </p>
-                      <div className="thm-persona-stats">
-                        <span className="thm-persona-stat"><strong>Points</strong>{formatNumber(thmPoints ?? 'Unknown')}</span>
-                        <span className="thm-persona-stat"><strong>Rank</strong>{formatNumber(thmRank || 'Unknown')}</span>
-                        <span className="thm-persona-stat"><strong>Level</strong>{thmLevel ?? 'Unknown'}</span>
+                <div className="thm-layout">
+                  <div className="thm-left">
+                    <div className="ink-wrap">
+                      <div className="ink thm-card" aria-label="TryHackMe identity card">
+                        <span className="thm-arcana">Arcana · {thmArcana}</span>
+                        <div className="thm-id">
+                          <div className="thm-avatar">
+                            {thmAvatar
+                              ? <img src={thmAvatar} alt={`${thmUsername || 'TryHackMe'} avatar`} loading="lazy" />
+                              : (thmUsername || 'T').slice(0, 1).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="thm-ribbon">TryHackMe Profile</p>
+                            <p className="thm-name">
+                              {thmUsername || 'Unknown Operative'}
+                              {thmTagLine && <span className="thm-tags">{thmTagLine}</span>}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="thm-stats">
+                          <div><span>Points</span><strong>{formatNumber(thmPoints ?? 'Unknown')}</strong></div>
+                          <div><span>Rank</span>{formatNumber(thmRank || 'Unknown')}</div>
+                          <div><span>Level</span>{thmLevel ?? 'Unknown'}</div>
+                        </div>
                       </div>
                     </div>
-                    <div className="thm-persona-rankbox">
-                      <span>Arcana</span>
-                      <strong>{thmArcana}</strong>
+
+                    <div className="stat-tiles">
+                      <div className="stat-tile" style={{ '--tilt': '-1deg' }}>
+                        <span>Global Rank</span>
+                        <strong>{formatNumber(thmRank || 'Unknown')}</strong>
+                      </div>
+                      <div className="stat-tile" style={{ '--tilt': '.6deg' }}>
+                        <span>Rooms Completed</span>
+                        <strong>{formatNumber(thmRoomCount ?? (thmRooms.length || 'Unknown'))}</strong>
+                      </div>
+                      <div className="stat-tile" style={{ '--tilt': '-.4deg' }}>
+                        <span>Skills Tracked</span>
+                        <strong>{thmSkillMatrix.length}</strong>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  <div className="thm-right">
+                    <div className="ink-wrap">
+                      <div className="ink">
+                        <div className="ink-title">Persona stats</div>
+                        <SkillRadar skills={thmSkills} />
+                        <p className="thm-sync">Live sync source: /api/tryhackme</p>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="thm-star-card">
-                    <SkillRadar skills={thmSkills} />
-                    <p className="thm-sync">Live sync source: /api/tryhackme</p>
-                  </div>
-
-                  <div className="thm-summary-card">
-                    <div className="summary-stat">
-                      <p className="stat-label">Global Rank</p>
-                      <p className="stat-value">{formatNumber(thmRank || 'Unknown')}</p>
-                    </div>
-                    <div className="summary-stat">
-                      <p className="stat-label">Rooms Completed</p>
-                      <p className="stat-value">{formatNumber(thmRoomCount ?? (thmRooms.length || 'Unknown'))}</p>
-                    </div>
-                    <div className="summary-stat">
-                      <p className="stat-label">Skills Tracked</p>
-                      <p className="stat-value">{thmSkillMatrix.length}</p>
-                    </div>
-                  </div>
-
-                  <div className="thm-skills-card">
-                    <h3>Skills Matrix</h3>
-                    <div className="skill-list">
-                      {thmSkillMatrix.map((skill) => (
-                        <div className="skill-item" key={skill.name}>
-                          <strong>{skill.name}</strong>
-                          <span>{`${Math.round(skill.value)}/100`}</span>
-                          <div className="skill-bar"><span style={{ width: `${normalizeSkillValue(skill.value)}%` }} /></div>
+                  <div className="thm-full">
+                    <div className="grid-label"><span className="bar" />Skills matrix</div>
+                    {thmSkillMatrix.map((skill, index) => (
+                      <div className="skill-row" key={skill.name}>
+                        <span className="name">{skill.name}</span>
+                        <div className="skill-bar">
+                          <div className="fill" style={{ width: barsOn ? `${normalizeSkillValue(skill.value)}%` : 0, transitionDelay: `${index * 60}ms` }} />
                         </div>
-                      ))}
-                    </div>
-                    {!thmSkills.length && (
-                      <p className="empty-note">No canonical skills were found in the current TryHackMe payload.</p>
-                    )}
+                        <span className="lv">{Math.round(skill.value)}<small>/100</small></span>
+                      </div>
+                    ))}
+                    {!thmSkills.length && <p className="note">No canonical skills were found in the current TryHackMe payload.</p>}
+                    {thmSkillsError && <p className="note">{shortNote(thmSkillsError)}</p>}
                   </div>
-
-                  <div className="thm-rooms-card">
-                    <h3>Completed Rooms</h3>
-                    {thmRooms.length ? (
-                      <ul>
-                        {thmRooms.map((room) => <li key={room}>{room}</li>)}
-                      </ul>
-                    ) : (
-                      <p className="empty-note">No room names were returned by the current TryHackMe payload. Count is still shown above.</p>
-                    )}
-                    {thmRoomCount && thmRooms.length > 0 && thmRoomCount > thmRooms.length && (
-                      <p className="empty-note">Showing {thmRooms.length} of {thmRoomCount} completed rooms.</p>
-                    )}
-                  </div>
-
-                  {thmSkillsError && (
-                    <div className="thm-rooms-card">
-                      <h3>Skills Sync Note</h3>
-                      <p className="empty-note">{thmSkillsError}</p>
-                    </div>
-                  )}
-
-                  {thmRoomsError && (
-                    <div className="thm-rooms-card">
-                      <h3>Rooms Sync Note</h3>
-                      <p className="empty-note">{thmRoomsError}</p>
-                    </div>
-                  )}
                 </div>
               )}
-            </section>
-
-            <section className="panel about-panel" id="about">
-              <div className="panel-title-wrap">
-                <h2 className="panel-title">Profile Intel</h2>
-              </div>
-              <div className="info-grid">
-                <article className="mini-panel">
-                  <h3>Languages</h3>
-                  <div className="tags">
-                    {languages.map((lang) => (
-                      <span key={lang} className="tag tag-language">
-                        <span className="tag-icon" aria-hidden="true">
-                          <LanguageIcon language={lang} />
-                        </span>
-                        <span>{lang}</span>
-                      </span>
-                    ))}
-                  </div>
-                </article>
-
-                <article className="mini-panel">
-                  <h3>Experience</h3>
-                  {experiences.map((exp) => (
-                    <div key={`${exp.company}-${exp.role}`} className="stack-item">
-                      <strong>{exp.role}</strong>
-                      <p>{exp.company} · {exp.dateRange}</p>
-                      {Array.isArray(exp.description) && exp.description.length > 0 && (
-                        <ul className="stack-points">
-                          {exp.description.map((point, idx) => <li key={`${exp.role}-point-${idx}`}>{point}</li>)}
-                        </ul>
-                      )}
-                    </div>
-                  ))}
-                </article>
-
-                <article className="mini-panel">
-                  <h3>Certifications</h3>
-                  {certifications.map((cert) => (
-                    <div key={`${cert.name}-${cert.date}`} className="stack-item">
-                      <a href={cert.url} target="_blank" rel="noreferrer">{cert.name}</a>
-                      <p>{cert.issuer} · {cert.date}</p>
-                    </div>
-                  ))}
-                </article>
-              </div>
-            </section>
-          </main>
-        </>
-      ) : route === 'cv' ? (
-        <main className="shell cv-page" id="cv-view">
-          <section className="panel cv-panel">
-            <div className="panel-title-wrap">
-              <h2 className="panel-title">Curriculum Vitae</h2>
             </div>
-            <div className="cv-viewer-frame">
-              <iframe className="cv-viewer" title="Shayden Naidoo CV" src={CV_PDF} />
-            </div>
-            <a className="cv-open-link" href={CV_PDF} target="_blank" rel="noreferrer">Open CV in a new tab</a>
+
+            {!thmDisabled && (
+              <div className="skill-group">
+                <h3>Completed Rooms</h3>
+                {thmRooms.length ? (
+                  <ul className="rooms">
+                    {thmRooms.map((room) => <li key={room} style={{ '--tilt': tiltFor(room) }}>{room}</li>)}
+                  </ul>
+                ) : (
+                  <p className="note">No room names were returned by the current TryHackMe payload.</p>
+                )}
+                {thmRoomCount && thmRooms.length > 0 && thmRoomCount > thmRooms.length && (
+                  <p className="note">Showing {thmRooms.length} of {thmRoomCount} completed rooms.</p>
+                )}
+                {thmRoomsError && <p className="note">{shortNote(thmRoomsError)}</p>}
+              </div>
+            )}
           </section>
-        </main>
-      ) : route === 'blog' ? (
-        <main className="shell blog-page" id="blog-view">
-          <section className="panel blog-panel">
-            <div className="panel-title-wrap">
-              <h2 className="panel-title">Blog Posts</h2>
+
+          {/* ABOUT */}
+          <section className={`screen sub align-right${route === 'about' ? ' active' : ''}`} id="screen-about" aria-label="About">
+            <div className="screen-head"><Ransom text="ABOUT" /></div>
+            <button type="button" className="back-hint" onClick={() => goTo('home')}>ESC · Back</button>
+            <div className="paper">
+              <figure className="about-photo">
+                <img src={PROFILE_IMAGE} alt={displayName} />
+                <figcaption>{nameParts[0] || 'Shayden'} · Pretoria</figcaption>
+              </figure>
+              <p className="quote">
+                <em>{headline}</em> — {bio}
+              </p>
+              <br />
+              <p>
+                I'm a Computer Science student at the <span className="stamp">University of Pretoria</span>,
+                focused on offensive security and full-stack engineering. You can explore my repositories at{' '}
+                <a href={githubUrl} target="_blank" rel="noreferrer">{githubUrl.replace(/^https?:\/\//, '')}</a>
+                {thmProfileUrl && (
+                  <>
+                    {' '}and follow my TryHackMe progress at{' '}
+                    <a href={thmProfileUrl} target="_blank" rel="noreferrer">tryhackme.com/p/{thmUsername}</a>
+                  </>
+                )}.
+              </p>
+
+              {experiences.length > 0 && <h3>Experience</h3>}
+              {experiences.map((exp) => (
+                <div key={`${exp.company}-${exp.role}`} className="exp">
+                  <div className="exp-role">{exp.role}</div>
+                  <div className="exp-co">{exp.company} · {exp.dateRange}</div>
+                  {Array.isArray(exp.description) && exp.description.length > 0 && (
+                    <ul>
+                      {exp.description.map((point, idx) => <li key={`${exp.role}-point-${idx}`}>{point}</li>)}
+                    </ul>
+                  )}
+                </div>
+              ))}
+
+              {certifications.length > 0 && <h3>Certifications</h3>}
+              {certifications.map((cert) => (
+                <div key={`${cert.name}-${cert.date}`} className="exp">
+                  <div className="exp-role"><a href={cert.url} target="_blank" rel="noreferrer">{cert.name}</a></div>
+                  <div className="exp-co">{cert.issuer} · {cert.date}</div>
+                </div>
+              ))}
             </div>
-            <p className="section-lead">Micro-post feed for weekly updates. Admin publishing is available from the burger-menu login.</p>
+            <div className="btn-row">
+              <a className="cv-btn" href={CV_PDF} download="Shayden_Naidoo_CV.pdf"><span>⬇ Download my CV (PDF)</span></a>
+              <button type="button" className="cv-btn small" onClick={() => goTo('cv')}><span>View CV →</span></button>
+            </div>
+          </section>
+
+          {/* CV */}
+          <section className={`screen sub align-right${route === 'cv' ? ' active' : ''}`} id="screen-cv" aria-label="Curriculum vitae">
+            <div className="screen-head"><Ransom text="CV" /></div>
+            <button type="button" className="back-hint" onClick={() => goTo('home')}>ESC · Back</button>
+            <div className="cv-frame">
+              {route === 'cv' && <iframe title={`${displayName} CV`} src={CV_PDF} />}
+            </div>
+            <div className="btn-row">
+              <a className="cv-btn" href={CV_PDF} download="Shayden_Naidoo_CV.pdf"><span>⬇ Download (PDF)</span></a>
+              <a className="cv-btn small" href={CV_PDF} target="_blank" rel="noreferrer"><span>Open in new tab ↗</span></a>
+            </div>
+          </section>
+
+          {/* BLOG */}
+          <section className={`screen sub${route === 'blog' ? ' active' : ''}`} id="screen-blog" aria-label="Blog">
+            <div className="screen-head"><Ransom text="BLOG" /></div>
+            <button type="button" className="back-hint" onClick={() => goTo('home')}>ESC · Back</button>
 
             {isAdminAuthenticated && (
-              <section className="blog-composer">
-                <p className="label-chip">Admin Composer</p>
-                <form className="blog-composer-form" onSubmit={handleCreateBlogPost}>
+              <form className="paper" style={{ maxWidth: 620 }} onSubmit={handleCreateBlogPost}>
+                <div className="form-head">Write a post</div>
+                <label className="field">
+                  <span>Update</span>
                   <textarea
-                    className="blog-textarea"
                     value={composerContent}
                     onChange={(event) => setComposerContent(event.target.value)}
                     placeholder="Write a new post update..."
                     rows={4}
                     maxLength={1000}
                   />
-
-                  <div className="blog-composer-controls">
-                    <label className="blog-upload-button">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleComposerImageChange}
-                      />
-                      Upload Image
-                    </label>
-                    <button type="submit" className="blog-publish-btn" disabled={composerBusy}>
-                      {composerBusy ? 'Publishing...' : 'Publish Post'}
-                    </button>
-                  </div>
-                </form>
-
+                </label>
                 {composerImageData && (
-                  <div className="blog-image-preview">
-                    <img src={composerImageData} alt="Selected blog upload preview" />
-                  </div>
+                  <div className="img-preview"><img src={composerImageData} alt="Selected blog upload preview" /></div>
                 )}
-
-                {composerNotice && (
-                  <p className="blog-composer-note">{composerNotice}</p>
-                )}
-              </section>
+                <div className="form-foot">
+                  <label className="upload-btn">
+                    <input type="file" accept="image/*" onChange={handleComposerImageChange} />
+                    Upload image
+                  </label>
+                  <button type="submit" className="cv-btn small" disabled={composerBusy}>
+                    <span>{composerBusy ? 'Publishing…' : 'Publish ➤'}</span>
+                  </button>
+                  {composerNotice && <div className="form-status" role="status">{composerNotice}</div>}
+                </div>
+              </form>
             )}
 
+            <div className="grid-label"><span className="bar" />Latest posts</div>
             {blogFeed.length ? (
-              <div className="blog-feed">
-                {blogFeed.map((post) => (
-                  <article className="blog-post-card" key={post.id}>
-                    <header className="blog-post-header">
-                      <strong>{profile?.displayName || 'Shayden Naidoo'}</strong>
-                      <span>@{(profile?.displayName || 'admin').toLowerCase().replace(/\s+/g, '')}</span>
-                      <time>{post.dateLabel}</time>
-                    </header>
-
-                    {post.title && <h3>{post.title}</h3>}
-                    {post.content && <p className="blog-post-content">{post.content}</p>}
-
-                    {post.imageData && (
-                      <div className="blog-post-image">
-                        <img src={post.imageData} alt="Blog post upload" loading="lazy" />
-                      </div>
-                    )}
-
+              <div className="grid" style={{ paddingBottom: '4vh' }}>
+                {blogFeed.map((post, index) => (
+                  <article
+                    className="card blog-card"
+                    key={post.id}
+                    style={{ '--tilt': tiltFor(post.id), '--d': `${index * 70}ms` }}
+                  >
+                    <Thumb src={post.imageData} alt="Blog post upload" />
+                    <span className="lang">{post.dateLabel}</span>
+                    <div className="byline">
+                      <strong>{displayName}</strong>
+                      <span>@{displayName.toLowerCase().replace(/\s+/g, '')}</span>
+                    </div>
+                    {post.title && <h3>{splitTitle(post.title)}</h3>}
+                    {post.content && <p>{post.content}</p>}
                     {post.link && (
-                      <a className="blog-link" href={post.link} target="_blank" rel="noreferrer">
-                        Open Link
-                      </a>
+                      <div className="meta">
+                        <span>Link</span>
+                        <a className="go" href={post.link} target="_blank" rel="noreferrer">Open ↗</a>
+                      </div>
                     )}
                   </article>
                 ))}
               </div>
             ) : (
-              <p className="empty-note">No posts published yet. Login via the burger menu to publish your first update.</p>
+              <p className="note">No posts published yet.</p>
             )}
-
-            <a className="cv-open-link" href={linkedInUrl} target="_blank" rel="noreferrer">Follow on LinkedIn</a>
+            <div className="contact-list" style={{ paddingTop: '3vh' }}>
+              <a className="contact-chip" href={linkedInUrl} target="_blank" rel="noreferrer"><span>Follow on LinkedIn ↗</span></a>
+            </div>
           </section>
-        </main>
-      ) : (
-        <main className="shell mission-page" id="mission-view">
-          <section className="panel mission-panel">
-            <div className="panel-title-wrap">
-              <h2 className="panel-title">Mission Control</h2>
+
+          {/* CONTACT */}
+          <section className={`screen sub align-right${route === 'contact' ? ' active' : ''}`} id="screen-contact" aria-label="Contact">
+            <div className="screen-head"><Ransom text="CONTACT" /></div>
+            <button type="button" className="back-hint" onClick={() => goTo('home')}>ESC · Back</button>
+            <div className="paper" style={{ maxWidth: 620 }}>
+              <p>
+                I'm open to <strong>security and software engineering roles</strong>, internships and
+                collaborations. Find me on any of these:
+              </p>
+            </div>
+            <div className="contact-list">
+              <a className="contact-chip" href={linkedInUrl} target="_blank" rel="noreferrer"><span>LinkedIn ↗</span></a>
+              <a className="contact-chip" href={githubUrl} target="_blank" rel="noreferrer"><span>GitHub ↗</span></a>
+              {thmProfileUrl && <a className="contact-chip" href={thmProfileUrl} target="_blank" rel="noreferrer"><span>TryHackMe ↗</span></a>}
+              {CONTACT_EMAIL && <a className="contact-chip" href={`mailto:${CONTACT_EMAIL}`}><span>Email ✉</span></a>}
+              <a className="contact-chip" href={CV_PDF} download="Shayden_Naidoo_CV.pdf"><span>CV ⬇</span></a>
             </div>
 
+            {CONTACT_EMAIL && (
+              <form className="paper" style={{ maxWidth: 620 }} noValidate onSubmit={handleContactSubmit}>
+                <div className="form-head">Send me a message</div>
+                <label className="field"><span>Name</span><input type="text" name="name" required maxLength={100} autoComplete="name" /></label>
+                <label className="field"><span>Your email</span><input type="email" name="email" required maxLength={150} autoComplete="email" /></label>
+                <label className="field"><span>Message</span><textarea name="message" required rows={5} maxLength={3000} /></label>
+                <input type="text" name="_honey" tabIndex={-1} autoComplete="off" style={{ position: 'absolute', left: -5000 }} aria-hidden="true" />
+                <div className="form-foot">
+                  <button type="submit" className="cv-btn small" disabled={contactBusy}><span>Send it ➤</span></button>
+                  <div className="form-status" role="status">{contactStatus}</div>
+                </div>
+              </form>
+            )}
+
+            {/* Admin access */}
+            {isAdminAuthenticated ? (
+              <>
+                <div className="paper" style={{ maxWidth: 620 }}>
+                  <div className="form-head">Phantom access</div>
+                  <p>Signed in as <span className="stamp">{adminUsername}</span></p>
+                  {adminNotice && <p className="form-status">{adminNotice}</p>}
+                </div>
+                <div className="contact-list">
+                  <button type="button" className="contact-chip" onClick={() => goTo('blog')}><span>Write post ✎</span></button>
+                  <button type="button" className="contact-chip" onClick={() => goTo('missions')}><span>Mission Control ▶</span></button>
+                  <button type="button" className="contact-chip danger" onClick={handleAdminLogout}><span>Log out ✕</span></button>
+                </div>
+              </>
+            ) : (
+              <form className="paper" style={{ maxWidth: 620 }} onSubmit={handleAdminLogin}>
+                <div className="form-head">Phantom access</div>
+                <label className="field">
+                  <span>Admin username</span>
+                  <input
+                    type="text"
+                    autoComplete="username"
+                    value={loginForm.username}
+                    onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Admin password</span>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={loginForm.password}
+                    onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
+                  />
+                </label>
+                <div className="form-foot">
+                  <button type="submit" className="cv-btn small" disabled={adminChecking}>
+                    <span>{adminChecking ? 'Signing in…' : 'Log in ➤'}</span>
+                  </button>
+                  {adminNotice && <div className="form-status err" role="status">{adminNotice}</div>}
+                </div>
+              </form>
+            )}
+          </section>
+
+          {/* MISSIONS (admin) */}
+          <section className={`screen sub${route === 'missions' ? ' active' : ''}`} id="screen-missions" aria-label="Mission Control">
+            <div className="screen-head"><Ransom text="MISSIONS" /></div>
+            <button type="button" className="back-hint" onClick={() => goTo('home')}>ESC · Back</button>
+
             {!isAdminAuthenticated ? (
-              <p className="empty-note">Admin login is required to access Mission Control. Use the burger menu to sign in.</p>
+              <>
+                <p className="note">Admin login is required to access Mission Control.</p>
+                <div className="contact-list">
+                  <button type="button" className="contact-chip" onClick={() => goTo('contact')}><span>Go to login ▶</span></button>
+                </div>
+              </>
             ) : (
               <>
-                <p className="section-lead">Track daily missions, due dates, and module marks using your Persona-style planner.</p>
-                {missionError && <p className="mission-note mission-note-error">{missionError}</p>}
-                {missionNotice && <p className="mission-note mission-note-info">{missionNotice}</p>}
+                {missionError && <p className="note" style={{ color: 'var(--white)', background: 'var(--black)', display: 'inline-block', padding: '4px 10px' }}>{missionError}</p>}
+                {missionNotice && <p className="note">{missionNotice}</p>}
 
                 {missionLoading && !missionControl ? (
-                  <p className="empty-note">Loading Mission Control data...</p>
+                  <p className="note">Loading Mission Control data…</p>
                 ) : (
                   <div className="mission-layout">
                     <div className="mission-column">
-                      <section className="mission-card">
-                        <h3>Create Mission</h3>
-                        <form className="mission-form" onSubmit={handleCreateMission}>
+                      <form className="paper" onSubmit={handleCreateMission}>
+                        <div className="form-head">Create mission</div>
+                        <label className="field">
+                          <span>Title</span>
                           <input
                             type="text"
-                            className="mission-input"
                             placeholder="Mission title"
                             value={missionForm.title}
                             maxLength={140}
                             onChange={(event) => setMissionForm((current) => ({ ...current, title: event.target.value }))}
                           />
+                        </label>
+                        <label className="field">
+                          <span>Description</span>
                           <textarea
-                            className="mission-textarea"
                             rows={3}
                             maxLength={500}
                             placeholder="Description (optional)"
                             value={missionForm.description}
                             onChange={(event) => setMissionForm((current) => ({ ...current, description: event.target.value }))}
                           />
-                          <div className="mission-form-row">
-                            <label>
-                              Type
-                              <select
-                                className="mission-select"
-                                value={missionForm.type}
-                                onChange={(event) => setMissionForm((current) => ({ ...current, type: event.target.value }))}
-                              >
-                                {MISSION_TYPES.map((type) => (
-                                  <option value={type} key={type}>{formatMissionType(type)}</option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              Priority
-                              <select
-                                className="mission-select"
-                                value={missionForm.priority}
-                                onChange={(event) => setMissionForm((current) => ({ ...current, priority: event.target.value }))}
-                              >
-                                {MISSION_PRIORITIES.map((priority) => (
-                                  <option value={priority} key={priority}>{formatMissionPriority(priority)}</option>
-                                ))}
-                              </select>
-                            </label>
-                          </div>
-                          <div className="mission-form-row">
-                            <label>
-                              Due Date
-                              <input
-                                type="date"
-                                className="mission-input"
-                                value={missionForm.dueDate}
-                                onChange={(event) => setMissionForm((current) => ({ ...current, dueDate: event.target.value }))}
-                              />
-                            </label>
-                            <label>
-                              Module
-                              <select
-                                className="mission-select"
-                                value={missionForm.moduleCode}
-                                onChange={(event) => setMissionForm((current) => ({ ...current, moduleCode: event.target.value }))}
-                              >
-                                <option value="">General</option>
-                                {missionModuleCodes.map((code) => <option key={code} value={code}>{code}</option>)}
-                              </select>
-                            </label>
-                          </div>
-                          <button type="submit" className="blog-publish-btn" disabled={missionBusy}>
-                            {missionBusy ? 'Saving...' : 'Add Mission'}
+                        </label>
+                        <div className="field-row">
+                          <label className="field">
+                            <span>Type</span>
+                            <select
+                              value={missionForm.type}
+                              onChange={(event) => setMissionForm((current) => ({ ...current, type: event.target.value }))}
+                            >
+                              {MISSION_TYPES.map((type) => <option value={type} key={type}>{formatMissionType(type)}</option>)}
+                            </select>
+                          </label>
+                          <label className="field">
+                            <span>Priority</span>
+                            <select
+                              value={missionForm.priority}
+                              onChange={(event) => setMissionForm((current) => ({ ...current, priority: event.target.value }))}
+                            >
+                              {MISSION_PRIORITIES.map((priority) => <option value={priority} key={priority}>{formatMissionPriority(priority)}</option>)}
+                            </select>
+                          </label>
+                        </div>
+                        <div className="field-row">
+                          <label className="field">
+                            <span>Due date</span>
+                            <input
+                              type="date"
+                              value={missionForm.dueDate}
+                              onChange={(event) => setMissionForm((current) => ({ ...current, dueDate: event.target.value }))}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Module</span>
+                            <select
+                              value={missionForm.moduleCode}
+                              onChange={(event) => setMissionForm((current) => ({ ...current, moduleCode: event.target.value }))}
+                            >
+                              <option value="">General</option>
+                              {missionModuleCodes.map((code) => <option key={code} value={code}>{code}</option>)}
+                            </select>
+                          </label>
+                        </div>
+                        <div className="form-foot">
+                          <button type="submit" className="cv-btn small" disabled={missionBusy}>
+                            <span>{missionBusy ? 'Saving…' : 'Add mission ➤'}</span>
                           </button>
-                        </form>
-                      </section>
+                        </div>
+                      </form>
 
-                      <section className="mission-card">
-                        <h3>Daily Missions</h3>
+                      <section className="paper">
+                        <div className="form-head">Daily missions</div>
                         {dailyMissions.length ? (
                           <ul className="mission-list">
                             {dailyMissions.map((mission) => (
@@ -2249,16 +2589,16 @@ function App() {
                             ))}
                           </ul>
                         ) : (
-                          <p className="empty-note">No active daily missions.</p>
+                          <p>No active daily missions.</p>
                         )}
                       </section>
 
-                      <section className="mission-card">
-                        <h3>Upcoming Deadlines</h3>
+                      <section className="paper">
+                        <div className="form-head">Upcoming deadlines</div>
                         {upcomingMissions.length ? (
                           <ul className="mission-list">
                             {upcomingMissions.map((mission) => (
-                              <li key={mission.id} className="mission-item mission-item-detailed">
+                              <li key={mission.id} className="mission-item">
                                 <div>
                                   <label className="mission-check">
                                     <input
@@ -2284,30 +2624,32 @@ function App() {
                             ))}
                           </ul>
                         ) : (
-                          <p className="empty-note">No upcoming missions right now.</p>
+                          <p>No upcoming missions right now.</p>
                         )}
                       </section>
                     </div>
 
-                    <div className="mission-column mission-column-wide">
-                      <section className="mission-card">
+                    <div className="mission-column">
+                      <section className="paper">
                         <div className="mission-calendar-head">
-                          <h3>Calendar</h3>
+                          <div className="form-head">Calendar</div>
                           <div className="mission-calendar-nav">
                             <button
                               type="button"
-                              className="menu-link"
+                              className="back-hint"
+                              style={{ marginLeft: 0 }}
                               onClick={() => setCalendarCursor((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}
                             >
-                              Prev
+                              ◀ Prev
                             </button>
                             <strong>{calendarHeading}</strong>
                             <button
                               type="button"
-                              className="menu-link"
+                              className="back-hint"
+                              style={{ marginLeft: 0 }}
                               onClick={() => setCalendarCursor((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))}
                             >
-                              Next
+                              Next ▶
                             </button>
                           </div>
                         </div>
@@ -2338,8 +2680,8 @@ function App() {
                         </div>
                       </section>
 
-                      <section className="mission-card">
-                        <h3>Academic Progress</h3>
+                      <section className="paper">
+                        <div className="form-head">Academic progress</div>
                         <div className="module-list">
                           {missionModules.map((module) => {
                             const code = module?.definition?.code || 'MODULE'
@@ -2353,11 +2695,11 @@ function App() {
                                   </div>
                                   <button
                                     type="button"
-                                    className="blog-publish-btn"
+                                    className="cv-btn small"
                                     disabled={missionBusy}
                                     onClick={() => handleSaveModuleProgress(code)}
                                   >
-                                    Save
+                                    <span>Save</span>
                                   </button>
                                 </header>
 
@@ -2370,7 +2712,7 @@ function App() {
 
                                 <div className="module-input-grid">
                                   {(module?.definition?.components || []).map((component) => (
-                                    <label key={component.key} className="module-input-row">
+                                    <label key={component.key} className="field">
                                       <span>{component.label} ({formatPercent(component.weight)})</span>
                                       <input
                                         type="number"
@@ -2379,11 +2721,10 @@ function App() {
                                         step="0.01"
                                         value={draft?.marks?.[component.key] ?? ''}
                                         onChange={(event) => handleModuleDraftValue(code, component.key, event.target.value)}
-                                        className="mission-input"
                                       />
                                     </label>
                                   ))}
-                                  <label className="module-input-row">
+                                  <label className="field">
                                     <span>Exam Mark</span>
                                     <input
                                       type="number"
@@ -2392,7 +2733,6 @@ function App() {
                                       step="0.01"
                                       value={draft?.examMark ?? ''}
                                       onChange={(event) => handleModuleExamDraft(code, event.target.value)}
-                                      className="mission-input"
                                     />
                                   </label>
                                 </div>
@@ -2413,14 +2753,17 @@ function App() {
               </>
             )}
           </section>
-        </main>
-      )}
 
-      <footer className="site-footer">
-        <p>&copy; 2026 Shayden Naidoo. All rights reserved.</p>
-        <p className="font-credit">Font attribution: <a href="http://www.onlinewebfonts.com" target="_blank" rel="noreferrer">Web Fonts</a></p>
-      </footer>
-    </div>
+        </div>
+
+        <div id="hud-bottom">
+          <span><span className="key">↑↓</span>Select</span>
+          <span><span className="key">Enter</span>Confirm</span>
+          <span><span className="key">Esc</span>Back</span>
+          <span id="clock">{clock}</span>
+        </div>
+      </div>
+    </>
   )
 }
 
