@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -21,6 +22,14 @@ import (
 // in a browser, which does pass the challenge.
 
 const thmSnapshotFile = "data/thm_snapshot.json"
+
+// Page size accepted by /api/v2/public-profile/completed-rooms (larger limits 404).
+const thmRoomsPageSize = 16
+
+func thmRoomsPageURL(username string, page int) string {
+	return fmt.Sprintf("https://tryhackme.com/api/v2/public-profile/completed-rooms?username=%s&limit=%d&page=%d",
+		username, thmRoomsPageSize, page)
+}
 
 type THMSnapshot struct {
 	ID          string `json:"id" bson:"id"`
@@ -180,8 +189,8 @@ func (a *App) handleAdminTHMSnapshot(w http.ResponseWriter, r *http.Request) {
 			if s == "" {
 				return nil, nil
 			}
-			var inner any
-			if err := json.Unmarshal([]byte(s), &inner); err != nil {
+			inner, err := parseJSONDocuments(s)
+			if err != nil {
 				return nil, fmt.Errorf("%s is not valid JSON", label)
 			}
 			return inner, nil
@@ -263,18 +272,62 @@ func (a *App) thmSnapshotMeta(snap *THMSnapshot) map[string]any {
 			"profile": "https://tryhackme.com/api/v2/public-profile?username=" + a.thmUser,
 			"skills": fmt.Sprintf("https://tryhackme.com/api/v2/users/skills?role=%s&segment=%s",
 				a.thmSkillsRole, a.thmSkillsSegment),
-			"rooms": "https://tryhackme.com/api/all-completed-rooms?username=" + a.thmUser + "&limit=100&page=1",
+			"rooms": thmRoomsPageURL(a.thmUser, 1),
 		},
+		"profilePage": "https://tryhackme.com/p/" + a.thmUser + "?tab=completed-rooms",
 	}
+	roomsCount := 0
 	if snap != nil {
 		meta["source"] = snap.Source
 		meta["updatedAt"] = snap.UpdatedAt
 		if p := snap.payload(); p != nil {
 			meta["skillsTracked"] = len(toAnySlice(p["skillsMatrix"]))
 			meta["roomsStored"] = len(toStringSlice(p["completedRooms"]))
+			if n, ok := asFloat64(p["completedRoomsCount"]); ok {
+				roomsCount = int(n + 0.5)
+			}
 		}
 	}
+	// TryHackMe serves completed rooms 16 per page; one link per page so the
+	// admin can paste them all into the rooms box.
+	pages := (roomsCount + thmRoomsPageSize - 1) / thmRoomsPageSize
+	if pages < 4 {
+		pages = 4
+	}
+	if pages > 25 {
+		pages = 25
+	}
+	roomsPages := make([]string, 0, pages)
+	for i := 1; i <= pages; i++ {
+		roomsPages = append(roomsPages, thmRoomsPageURL(a.thmUser, i))
+	}
+	meta["roomsPages"] = roomsPages
 	return meta
+}
+
+// parseJSONDocuments accepts one JSON value, or several pasted back to back
+// (for example multiple pages of a paginated endpoint), which are returned as
+// an array so the extractors walk all of them.
+func parseJSONDocuments(text string) (any, error) {
+	dec := json.NewDecoder(strings.NewReader(text))
+	var docs []any
+	for {
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		docs = append(docs, v)
+	}
+	switch len(docs) {
+	case 0:
+		return nil, nil
+	case 1:
+		return docs[0], nil
+	}
+	return docs, nil
 }
 
 func toStringSlice(v any) []string {

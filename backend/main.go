@@ -840,20 +840,15 @@ func (a *App) fetchTHMCompletedRooms(client *http.Client) ([]string, int, error)
 }
 
 func (a *App) fetchTHMCompletedRoomsFromAllCompletedEndpoint(client *http.Client) ([]string, int, error) {
-	const pageSize = 100
-	const maxPages = 20
+	const pageSize = thmRoomsPageSize
+	const maxPages = 40
 
 	var out []string
 	expectedCount := 0
 	var firstErr error
 
 	for page := 1; page <= maxPages; page++ {
-		endpoint := fmt.Sprintf(
-			"https://tryhackme.com/api/all-completed-rooms?username=%s&limit=%d&page=%d",
-			url.QueryEscape(a.thmUser),
-			pageSize,
-			page,
-		)
+		endpoint := thmRoomsPageURL(url.QueryEscape(a.thmUser), page)
 		data, err := a.fetchTHMJSON(client, endpoint)
 		if err != nil {
 			if page == 1 {
@@ -995,6 +990,9 @@ func extractTHMRoomCount(raw any) (int, bool) {
 			"rooms_count",
 			"noCompletedRooms",
 			"allCompletedRooms",
+			"totalDocs",
+			"totalRooms",
+			"totalCompletedRooms",
 		); ok {
 			return normalize(n), true
 		}
@@ -1016,6 +1014,9 @@ func extractTHMRoomCount(raw any) (int, bool) {
 		"rooms_count",
 		"noCompletedRooms",
 		"allCompletedRooms",
+		"totalDocs",
+		"totalRooms",
+		"totalCompletedRooms",
 	); ok {
 		return normalize(n), true
 	}
