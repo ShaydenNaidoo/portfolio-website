@@ -230,7 +230,7 @@ const buildTHMSkillMatrix = (skills) => {
   return THM_SKILL_ORDER.map((name) => ({ name, value: normalizeSkillValue(byName.get(name) || 0) }))
 }
 
-const extractRank = (data) => pickDeep(data, (key, value) => /(global.?rank|world.?rank|^rank$|ranking)/i.test(key) && (typeof value === 'number' || typeof value === 'string'))
+const extractRank = (data) => pickDeep(data, (key, value) => /(global.?rank|world.?rank|user.?rank|^rank$|ranking)/i.test(key) && (typeof value === 'number' || typeof value === 'string'))
 
 const extractTHMProfileNode = (data) => {
   if (!data || typeof data !== 'object') {
@@ -1155,6 +1155,10 @@ function App() {
   const [loaded, setLoaded] = useState(false)
   const [contactStatus, setContactStatus] = useState('')
   const [contactBusy, setContactBusy] = useState(false)
+  const [thmSyncMeta, setThmSyncMeta] = useState(null)
+  const [thmSyncForm, setThmSyncForm] = useState({ profile: '', skills: '', rooms: '' })
+  const [thmSyncBusy, setThmSyncBusy] = useState(false)
+  const [thmSyncNotice, setThmSyncNotice] = useState('')
   const reducedMotion = useReducedMotion()
   const clock = useClock()
   const routeRef = useRef(route)
@@ -2053,6 +2057,76 @@ function App() {
     }
   }
 
+  const loadThmSyncMeta = async () => {
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      return
+    }
+    try {
+      const response = await fetch(`${API}/api/admin/tryhackme/snapshot`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (response.ok) {
+        setThmSyncMeta(await response.json())
+      }
+    } catch {
+      // panel still renders without meta
+    }
+  }
+
+  useEffect(() => {
+    if (route === 'missions' && isAdminAuthenticated) {
+      loadThmSyncMeta()
+    }
+  }, [route, isAdminAuthenticated])
+
+  const handleThmSync = async (event) => {
+    event.preventDefault()
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      setThmSyncNotice('Login is required.')
+      return
+    }
+    if (!thmSyncForm.profile.trim() && !thmSyncForm.skills.trim() && !thmSyncForm.rooms.trim()) {
+      setThmSyncNotice('Paste at least one JSON response first.')
+      return
+    }
+    setThmSyncBusy(true)
+    setThmSyncNotice('')
+    try {
+      const response = await fetch(`${API}/api/admin/tryhackme/snapshot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          profile: thmSyncForm.profile.trim(),
+          skills: thmSyncForm.skills.trim(),
+          rooms: thmSyncForm.rooms.trim()
+        })
+      })
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response, 'Sync failed.'))
+      }
+      const meta = await response.json()
+      setThmSyncMeta(meta)
+      setThmSyncForm({ profile: '', skills: '', rooms: '' })
+      setThmSyncNotice(`Saved · ${meta.skillsParsed ?? 0} skills · ${meta.roomsParsed ?? 0} rooms.`)
+      setThmResponse(null) // triggers a fresh /api/tryhackme load
+      playSelect()
+    } catch (syncError) {
+      setThmSyncNotice(syncError.message || 'Sync failed.')
+    } finally {
+      setThmSyncBusy(false)
+    }
+  }
+
+  const thmStaleNote = useMemo(() => {
+    if (!thmResponse?.stale) {
+      return ''
+    }
+    const when = thmResponse.snapshotUpdatedAt ? formatDate(thmResponse.snapshotUpdatedAt) : 'an earlier sync'
+    return `Live sync blocked by TryHackMe · showing snapshot from ${when}`
+  }, [thmResponse])
+
   const displayName = profile?.displayName || 'Shayden Naidoo'
   const nameParts = displayName.toUpperCase().split(/\s+/).filter(Boolean)
   const headline = profile?.headline || 'Cybersecurity & Software Engineering'
@@ -2176,6 +2250,8 @@ function App() {
               <h3>TryHackMe Intel</h3>
               {thmDisabled ? (
                 <p className="note">{shortNote(thmData.__message)}</p>
+              ) : thmData?.error && !thmProfile?.publicProfile && !thmUsername ? (
+                <p className="note">{shortNote(thmData.error)}</p>
               ) : (
                 <div className="thm-layout">
                   <div className="thm-left">
@@ -2226,7 +2302,7 @@ function App() {
                       <div className="ink">
                         <div className="ink-title">Persona stats</div>
                         <SkillRadar skills={thmSkills} />
-                        <p className="thm-sync">Live sync source: /api/tryhackme</p>
+                        <p className="thm-sync">{thmStaleNote || 'Live sync source: /api/tryhackme'}</p>
                       </div>
                     </div>
                   </div>
@@ -2679,6 +2755,47 @@ function App() {
                           ))}
                         </div>
                       </section>
+
+                      <form className="paper" onSubmit={handleThmSync}>
+                        <div className="form-head">TryHackMe sync</div>
+                        <p>
+                          TryHackMe blocks server-side requests with a bot challenge, but your browser passes it.
+                          Open each endpoint in a new tab, copy the JSON, paste it below and save. Blank fields keep the previous snapshot.
+                        </p>
+                        {thmSyncMeta && (
+                          <p className="mission-meta" style={{ margin: '8px 0 12px' }}>
+                            {thmSyncMeta.hasSnapshot
+                              ? `Snapshot: ${thmSyncMeta.source} · ${formatDate(thmSyncMeta.updatedAt)} · ${thmSyncMeta.skillsTracked ?? 0} skills · ${thmSyncMeta.roomsStored ?? 0} rooms`
+                              : 'No snapshot stored yet.'}
+                          </p>
+                        )}
+                        {['profile', 'skills', 'rooms'].map((key) => (
+                          <label className="field" key={key}>
+                            <span>
+                              {key} JSON
+                              {thmSyncMeta?.endpoints?.[key] && (
+                                <>
+                                  {' · '}
+                                  <a href={thmSyncMeta.endpoints[key]} target="_blank" rel="noreferrer">open endpoint ↗</a>
+                                </>
+                              )}
+                            </span>
+                            <textarea
+                              rows={3}
+                              spellCheck={false}
+                              placeholder={`Paste the ${key} JSON here`}
+                              value={thmSyncForm[key]}
+                              onChange={(event) => setThmSyncForm((current) => ({ ...current, [key]: event.target.value }))}
+                            />
+                          </label>
+                        ))}
+                        <div className="form-foot">
+                          <button type="submit" className="cv-btn small" disabled={thmSyncBusy}>
+                            <span>{thmSyncBusy ? 'Saving…' : 'Save snapshot ➤'}</span>
+                          </button>
+                          {thmSyncNotice && <div className="form-status" role="status">{thmSyncNotice}</div>}
+                        </div>
+                      </form>
 
                       <section className="paper">
                         <div className="form-head">Academic progress</div>

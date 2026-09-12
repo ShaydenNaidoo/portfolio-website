@@ -196,6 +196,7 @@ func main() {
 	mux.HandleFunc("/api/admin/blog", app.handleAdminBlogCreate)
 	mux.HandleFunc("/api/admin/mission-control", app.handleAdminMissionControl)
 	mux.HandleFunc("/api/admin/mission-control/", app.handleAdminMissionControlSubroute)
+	mux.HandleFunc("/api/admin/tryhackme/snapshot", app.handleAdminTHMSnapshot)
 	mux.HandleFunc("/api/tryhackme", app.handleTHM)
 	mux.HandleFunc("/webhooks/github", app.handleGitHubWebhook)
 
@@ -606,8 +607,6 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	client := &http.Client{Timeout: 12 * time.Second}
 	profileURL := "https://tryhackme.com/api/v2/public-profile?username=" + url.QueryEscape(a.thmUser)
 	profileData, profileErr := a.fetchTHMJSON(client, profileURL)
-	profileRooms := extractTHMRoomNames(profileData)
-	profileRoomsCount, _ := extractTHMRoomCount(profileData)
 
 	canUsePrivateTHMEndpoints := a.hasTHMAuthSession()
 
@@ -623,65 +622,89 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	} else {
 		skillsErr = fmt.Errorf("TryHackMe skills endpoint requires THM_COOKIE or THM_SESSION; using public profile data only")
 	}
-	normalizedSkills := normalizeTHMSkills(skillsData)
+	if skillsErr == nil && len(normalizeTHMSkills(skillsData)) == 0 {
+		skillsErr = fmt.Errorf("skills endpoint returned no parsable matrix values; ensure THM_COOKIE/THM_SESSION includes a valid connect.sid session")
+	}
 
-	completedRooms := append([]string(nil), profileRooms...)
-	completedRoomsCount := profileRoomsCount
-	completedRoomsSource := "public-profile"
+	var fetchedRooms []string
+	var fetchedRoomsCount int
 	var roomsErr error
+	roomsSource := "public-profile"
 	if canUsePrivateTHMEndpoints {
-		fetchedRooms, fetchedRoomsCount, fetchErr := a.fetchTHMCompletedRooms(client)
-		roomsErr = fetchErr
-		completedRooms = mergeUniqueStrings(fetchedRooms, completedRooms)
-		if fetchedRoomsCount > completedRoomsCount {
-			completedRoomsCount = fetchedRoomsCount
+		fetchedRooms, fetchedRoomsCount, roomsErr = a.fetchTHMCompletedRooms(client)
+		if roomsErr == nil {
+			roomsSource = "/api/all-completed-rooms"
 		}
-		completedRoomsSource = "/api/all-completed-rooms"
-	} else if len(completedRooms) == 0 {
+	} else if len(extractTHMRoomNames(profileData)) == 0 {
 		roomsErr = fmt.Errorf("TryHackMe rooms endpoints require THM_COOKIE or THM_SESSION; no public room list was available")
 	}
-	if completedRoomsCount < len(completedRooms) {
-		completedRoomsCount = len(completedRooms)
+
+	// Fall back to the stored snapshot for whichever parts failed live.
+	snapshot, _ := a.loadTHMSnapshot()
+	snapPayload := snapshot.payload()
+	stale := map[string]bool{}
+	if profileErr != nil && snapPayload != nil && snapPayload["publicProfile"] != nil {
+		profileData = snapPayload["publicProfile"]
+		stale["profile"] = true
+	}
+	if skillsErr != nil && snapPayload != nil {
+		if sr, ok := snapPayload["skillsResponse"].(map[string]any); ok && len(normalizeTHMSkills(sr["data"])) > 0 {
+			skillsData = sr["data"]
+			stale["skills"] = true
+		}
+	}
+	if roomsErr != nil && snapPayload != nil {
+		if rooms := toStringSlice(snapPayload["completedRooms"]); len(rooms) > 0 {
+			fetchedRooms = rooms
+			if n, ok := asFloat64(snapPayload["completedRoomsCount"]); ok {
+				fetchedRoomsCount = int(n + 0.5)
+			}
+			if src, ok := snapPayload["completedRoomsSource"].(string); ok && src != "" {
+				roomsSource = src
+			}
+			stale["rooms"] = true
+		}
 	}
 
-	if profileErr != nil && skillsErr != nil && roomsErr != nil {
+	if profileData == nil {
 		response := map[string]any{
 			"enabled":      true,
-			"error":        "Unable to fetch TryHackMe profile, skills, and completed rooms data",
-			"profileError": profileErr.Error(),
-			"skillsError":  skillsErr.Error(),
-			"roomsError":   roomsErr.Error(),
+			"error":        "Unable to fetch TryHackMe data and no snapshot is stored yet. Sign in and use the TryHackMe sync panel in Mission Control.",
+			"profileError": shortTHMError(profileErr),
+			"skillsError":  shortTHMError(skillsErr),
+			"roomsError":   shortTHMError(roomsErr),
 		}
 		a.cacheTHMResponse(response)
 		respondJSON(w, response)
 		return
 	}
 
-	payload := map[string]any{
-		"publicProfile": profileData,
-		"skillsResponse": map[string]any{
-			"role":    a.thmSkillsRole,
-			"segment": a.thmSkillsSegment,
-			"data":    skillsData,
-		},
-		"skillsMatrix":         normalizedSkills,
-		"completedRooms":       completedRooms,
-		"completedRoomsCount":  completedRoomsCount,
-		"completedRoomsSource": completedRoomsSource,
+	payload := a.buildTHMPayload(profileData, skillsData, fetchedRooms, fetchedRoomsCount, roomsSource)
+	if profileErr != nil && !stale["profile"] {
+		payload["profileError"] = shortTHMError(profileErr)
 	}
-	if profileErr != nil {
-		payload["profileError"] = profileErr.Error()
+	if skillsErr != nil && !stale["skills"] {
+		payload["skillsError"] = shortTHMError(skillsErr)
 	}
-	if skillsErr != nil {
-		payload["skillsError"] = skillsErr.Error()
-	} else if len(normalizedSkills) == 0 {
-		payload["skillsError"] = "Skills endpoint returned no parsable matrix values. Ensure THM_COOKIE/THM_SESSION includes a valid connect.sid session."
+	if roomsErr != nil && !stale["rooms"] {
+		payload["completedRoomsError"] = shortTHMError(roomsErr)
 	}
-	if roomsErr != nil {
-		payload["completedRoomsError"] = roomsErr.Error()
+
+	// Everything that came back live is worth keeping for next time.
+	if profileErr == nil {
+		_ = a.saveTHMSnapshot(payload, "live")
 	}
 
 	response := map[string]any{"enabled": true, "data": payload}
+	if len(stale) > 0 {
+		response["stale"] = true
+		response["staleParts"] = stale
+		if snapshot != nil {
+			response["snapshotUpdatedAt"] = snapshot.UpdatedAt
+			response["snapshotSource"] = snapshot.Source
+		}
+		response["liveError"] = shortTHMError(profileErr)
+	}
 	a.cacheTHMResponse(response)
 	respondJSON(w, response)
 }

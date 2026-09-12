@@ -19,6 +19,7 @@ type MongoStore struct {
 	blogPosts   *mongo.Collection
 	missions    *mongo.Collection
 	moduleState *mongo.Collection
+	thmSnapshot *mongo.Collection
 }
 
 func (a *App) initMongoStoreFromEnv() {
@@ -60,6 +61,7 @@ func newMongoStore(uri string, databaseName string) (*MongoStore, error) {
 		blogPosts:   database.Collection("blog_posts"),
 		missions:    database.Collection("missions"),
 		moduleState: database.Collection("module_progress"),
+		thmSnapshot: database.Collection("thm_snapshot"),
 	}
 
 	if err := store.ensureIndexes(ctx); err != nil {
