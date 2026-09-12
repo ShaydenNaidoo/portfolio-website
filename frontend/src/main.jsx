@@ -225,10 +225,10 @@ const orderTHMSkills = (skills) => {
     .map((name) => ({ name, value: scoreBySkill.get(name) || 0 }))
 }
 
-const buildTHMSkillMatrix = (skills) => {
-  const byName = new Map(skills.map((skill) => [skill.name, skill.value]))
-  return THM_SKILL_ORDER.map((name) => ({ name, value: normalizeSkillValue(byName.get(name) || 0) }))
-}
+// The backend already orders the matrix by the admin-configured categories.
+const buildTHMSkillMatrix = (skills) => (Array.isArray(skills) ? skills : [])
+  .map((skill) => ({ name: String(skill.name || ''), value: normalizeSkillValue(skill.value) }))
+  .filter((skill) => skill.name)
 
 const extractRank = (data) => pickDeep(data, (key, value) => /(global.?rank|world.?rank|user.?rank|^rank$|ranking)/i.test(key) && (typeof value === 'number' || typeof value === 'string'))
 
@@ -444,6 +444,11 @@ const extractRooms = (data) => {
 
 const extractSkills = (data) => {
   let matrix = null
+  if (data && typeof data === 'object' && Array.isArray(data.skillsMatrix)
+    && data.skillsMatrix.every((item) => item && typeof item === 'object' && typeof item.name === 'string')) {
+    // Normalised by the backend (configured categories + private-room boosts): keep as-is.
+    return buildTHMSkillMatrix(data.skillsMatrix)
+  }
   if (data && typeof data === 'object') {
     const directMatrix = data.skillsMatrix || data.skills_matrix
     if (Array.isArray(directMatrix) || (directMatrix && typeof directMatrix === 'object')) {
@@ -1163,6 +1168,10 @@ function App() {
   const [roomForm, setRoomForm] = useState({ url: '', name: '', skills: [], boost: 5 })
   const [roomBusy, setRoomBusy] = useState(false)
   const [roomNotice, setRoomNotice] = useState('')
+  const [skillCategories, setSkillCategories] = useState([])
+  const [skillForm, setSkillForm] = useState({ name: '', baseValue: 0 })
+  const [skillBusy, setSkillBusy] = useState(false)
+  const [skillNotice, setSkillNotice] = useState('')
   const reducedMotion = useReducedMotion()
   const clock = useClock()
   const routeRef = useRef(route)
@@ -2173,6 +2182,94 @@ function App() {
     skills: current.skills.includes(skill) ? current.skills.filter((item) => item !== skill) : [...current.skills, skill]
   }))
 
+  const loadSkillCategories = async () => {
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      return
+    }
+    try {
+      const response = await fetch(`${API}/api/admin/tryhackme/skills`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (response.ok) {
+        const payload = await response.json()
+        setSkillCategories(Array.isArray(payload?.categories) ? payload.categories : [])
+      }
+    } catch {
+      // panel still renders without the list
+    }
+  }
+
+  useEffect(() => {
+    if (route === 'missions' && isAdminAuthenticated) {
+      loadSkillCategories()
+    }
+  }, [route, isAdminAuthenticated])
+
+  const handleAddSkillCategory = async (event) => {
+    event.preventDefault()
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      setSkillNotice('Login is required.')
+      return
+    }
+    if (!skillForm.name.trim()) {
+      setSkillNotice('Enter a skill name first.')
+      return
+    }
+    setSkillBusy(true)
+    setSkillNotice('')
+    try {
+      const response = await fetch(`${API}/api/admin/tryhackme/skills`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: skillForm.name.trim(), baseValue: Number(skillForm.baseValue) || 0 })
+      })
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response, 'Could not save skill.'))
+      }
+      const payload = await response.json()
+      setSkillCategories(Array.isArray(payload?.categories) ? payload.categories : [])
+      setSkillNotice(payload.status === 'updated' ? 'Skill updated.' : 'Skill added.')
+      setSkillForm({ name: '', baseValue: 0 })
+      setThmResponse(null)
+      playSelect()
+    } catch (skillError) {
+      setSkillNotice(skillError.message || 'Could not save skill.')
+    } finally {
+      setSkillBusy(false)
+    }
+  }
+
+  const handleDeleteSkillCategory = async (name) => {
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      return
+    }
+    setSkillBusy(true)
+    setSkillNotice('')
+    try {
+      const response = await fetch(`${API}/api/admin/tryhackme/skills/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response, 'Could not remove skill.'))
+      }
+      const payload = await response.json()
+      setSkillCategories(Array.isArray(payload?.categories) ? payload.categories : [])
+      setSkillNotice(`Removed “${name}”.`)
+      setRoomForm((current) => ({ ...current, skills: current.skills.filter((item) => item !== name) }))
+      setThmResponse(null)
+    } catch (skillError) {
+      setSkillNotice(skillError.message || 'Could not remove skill.')
+    } finally {
+      setSkillBusy(false)
+    }
+  }
+
+  const skillCategoryNames = skillCategories.length ? skillCategories.map((category) => category.name) : THM_SKILL_ORDER
+
   const handleThmSync = async (event) => {
     event.preventDefault()
     const token = String(adminToken || '').trim()
@@ -2900,6 +2997,63 @@ function App() {
                         </div>
                       </form>
 
+                      <form className="paper" onSubmit={handleAddSkillCategory}>
+                        <div className="form-head">Skill categories</div>
+                        <p>
+                          These are the axes of the skills matrix and radar. A skill takes its value from TryHackMe when the
+                          name matches one of theirs; otherwise it starts at the base value and grows with private-room boosts.
+                        </p>
+                        {skillCategories.length > 0 && (
+                          <ul className="mission-list" style={{ margin: '12px 0 18px' }}>
+                            {skillCategories.map((category) => (
+                              <li key={category.name} className="mission-item">
+                                <div>
+                                  <strong>{category.name}</strong>
+                                  <p className="mission-meta">Base value {Math.round(category.baseValue || 0)}/100</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="mission-delete"
+                                  disabled={skillBusy}
+                                  onClick={() => handleDeleteSkillCategory(category.name)}
+                                  aria-label={`Remove ${category.name}`}
+                                >
+                                  Remove
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <div className="field-row">
+                          <label className="field">
+                            <span>Skill name (re-enter an existing one to change its base)</span>
+                            <input
+                              type="text"
+                              maxLength={40}
+                              placeholder="e.g. Web Hacking"
+                              value={skillForm.name}
+                              onChange={(event) => setSkillForm((current) => ({ ...current, name: event.target.value }))}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Base value (0–100)</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={skillForm.baseValue}
+                              onChange={(event) => setSkillForm((current) => ({ ...current, baseValue: event.target.value }))}
+                            />
+                          </label>
+                        </div>
+                        <div className="form-foot">
+                          <button type="submit" className="cv-btn small" disabled={skillBusy}>
+                            <span>{skillBusy ? 'Saving…' : 'Add skill ➤'}</span>
+                          </button>
+                          {skillNotice && <div className="form-status" role="status">{skillNotice}</div>}
+                        </div>
+                      </form>
+
                       <form className="paper" onSubmit={handleAddManualRoom}>
                         <div className="form-head">Private rooms</div>
                         <p>
@@ -2941,7 +3095,7 @@ function App() {
                         <div className="field">
                           <span>Skills trained</span>
                           <div className="skill-picks">
-                            {THM_SKILL_ORDER.map((skill) => (
+                            {skillCategoryNames.map((skill) => (
                               <label key={skill} className={`skill-pick${roomForm.skills.includes(skill) ? ' on' : ''}`}>
                                 <input type="checkbox" checked={roomForm.skills.includes(skill)} onChange={() => toggleRoomSkill(skill)} />
                                 {skill}

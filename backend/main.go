@@ -199,6 +199,8 @@ func main() {
 	mux.HandleFunc("/api/admin/tryhackme/snapshot", app.handleAdminTHMSnapshot)
 	mux.HandleFunc("/api/admin/tryhackme/rooms", app.handleAdminTHMManualRooms)
 	mux.HandleFunc("/api/admin/tryhackme/rooms/", app.handleAdminTHMManualRooms)
+	mux.HandleFunc("/api/admin/tryhackme/skills", app.handleAdminTHMSkillCategories)
+	mux.HandleFunc("/api/admin/tryhackme/skills/", app.handleAdminTHMSkillCategories)
 	mux.HandleFunc("/api/tryhackme", app.handleTHM)
 	mux.HandleFunc("/webhooks/github", app.handleGitHubWebhook)
 
@@ -696,7 +698,7 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	if profileErr == nil {
 		_ = a.saveTHMSnapshot(payload, "live")
 	}
-	a.applyTHMManualRooms(payload)
+	a.applyTHMCustomization(payload)
 
 	response := map[string]any{"enabled": true, "data": payload}
 	if len(stale) > 0 {

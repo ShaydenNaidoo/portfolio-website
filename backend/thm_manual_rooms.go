@@ -28,15 +28,6 @@ const (
 	thmManualRoomBoostDflt = 5
 )
 
-var thmSkillCategories = []string{
-	"Security Operations",
-	"Incident Response",
-	"Malware Analysis",
-	"Penetration Testing",
-	"Exploitation",
-	"Red Teaming",
-}
-
 var thmRoomCodePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,120}$`)
 
 type THMManualRoom struct {
@@ -108,16 +99,6 @@ func prettyTHMRoomName(code string) string {
 	return strings.Join(parts, " ")
 }
 
-func canonicalTHMSkillCategory(name string) string {
-	needle := strings.ToLower(strings.TrimSpace(name))
-	for _, category := range thmSkillCategories {
-		if strings.ToLower(category) == needle {
-			return category
-		}
-	}
-	return ""
-}
-
 func (a *App) loadTHMManualRooms() ([]THMManualRoom, error) {
 	if a.mongoStore != nil {
 		return a.mongoStore.LoadTHMManualRooms()
@@ -147,16 +128,73 @@ func (a *App) saveTHMManualRoomsFile(rooms []THMManualRoom) error {
 	return os.WriteFile(thmManualRoomsFile, b, 0o644)
 }
 
-// applyTHMManualRooms folds the registered private rooms into a payload built
-// from live or snapshot data. It is applied at response time so the stored
-// snapshot stays untouched and the operation is idempotent.
-func (a *App) applyTHMManualRooms(payload map[string]any) {
+// applyTHMCustomization rebuilds the skills matrix from the configured
+// categories (TryHackMe value when the name matches, else the base value, plus
+// private-room boosts) and folds registered private rooms into the completed
+// list and count. It runs at response time so the stored snapshot stays
+// untouched and the operation is idempotent.
+func (a *App) applyTHMCustomization(payload map[string]any) {
+	categories, err := a.loadTHMSkillCategories()
+	if err != nil {
+		categories = append([]THMSkillCategory(nil), thmDefaultSkillCategories...)
+	}
 	rooms, err := a.loadTHMManualRooms()
-	if err != nil || len(rooms) == 0 {
+	if err != nil {
+		rooms = nil
+	}
+
+	// Values reported by TryHackMe, keyed by lower-case name.
+	reported := map[string]float64{}
+	switch m := payload["skillsMatrix"].(type) {
+	case []THMSkill:
+		for _, skill := range m {
+			reported[strings.ToLower(skill.Name)] = skill.Value
+		}
+	case []any:
+		for _, item := range m {
+			if obj, ok := item.(map[string]any); ok {
+				name, _ := obj["name"].(string)
+				value, _ := asFloat64(obj["value"])
+				if name != "" {
+					reported[strings.ToLower(name)] = value
+				}
+			}
+		}
+	}
+
+	matrix := make([]THMSkill, 0, len(categories))
+	index := map[string]int{}
+	for i, category := range categories {
+		key := strings.ToLower(category.Name)
+		value := category.BaseValue
+		if v, ok := reported[key]; ok && v > value {
+			value = v
+		}
+		matrix = append(matrix, THMSkill{Name: category.Name, Value: value})
+		index[key] = i
+	}
+	for _, room := range rooms {
+		for _, skill := range room.Skills {
+			if i, ok := index[strings.ToLower(skill)]; ok {
+				matrix[i].Value += room.Boost
+			}
+		}
+	}
+	for i := range matrix {
+		if matrix[i].Value > 100 {
+			matrix[i].Value = 100
+		}
+		if matrix[i].Value < 0 {
+			matrix[i].Value = 0
+		}
+	}
+	payload["skillsMatrix"] = matrix
+	payload["skillCategories"] = thmSkillCategoryNames(categories)
+
+	if len(rooms) == 0 {
 		payload["manualRooms"] = []THMManualRoom{}
 		return
 	}
-
 	existing := toStringSlice(payload["completedRooms"])
 	names := make([]string, 0, len(rooms))
 	for _, room := range rooms {
@@ -175,43 +213,6 @@ func (a *App) applyTHMManualRooms(payload map[string]any) {
 		count = len(merged)
 	}
 	payload["completedRoomsCount"] = count
-
-	// Skill matrix boost per category, capped at 100.
-	var matrix []THMSkill
-	switch m := payload["skillsMatrix"].(type) {
-	case []THMSkill:
-		matrix = append(matrix, m...)
-	case []any:
-		for _, item := range m {
-			if obj, ok := item.(map[string]any); ok {
-				name, _ := obj["name"].(string)
-				value, _ := asFloat64(obj["value"])
-				if name != "" {
-					matrix = append(matrix, THMSkill{Name: name, Value: value})
-				}
-			}
-		}
-	}
-	index := map[string]int{}
-	for i, skill := range matrix {
-		index[strings.ToLower(skill.Name)] = i
-	}
-	for _, room := range rooms {
-		for _, category := range room.Skills {
-			key := strings.ToLower(category)
-			i, ok := index[key]
-			if !ok {
-				matrix = append(matrix, THMSkill{Name: category, Value: 0})
-				i = len(matrix) - 1
-				index[key] = i
-			}
-			matrix[i].Value += room.Boost
-			if matrix[i].Value > 100 {
-				matrix[i].Value = 100
-			}
-		}
-	}
-	payload["skillsMatrix"] = matrix
 	payload["manualRooms"] = rooms
 }
 
@@ -238,7 +239,8 @@ func (a *App) handleAdminTHMManualRooms(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "failed to load rooms", http.StatusInternalServerError)
 			return
 		}
-		respondJSON(w, map[string]any{"rooms": rooms, "categories": thmSkillCategories})
+		categories, _ := a.loadTHMSkillCategories()
+		respondJSON(w, map[string]any{"rooms": rooms, "categories": thmSkillCategoryNames(categories)})
 
 	case http.MethodPost:
 		var in THMManualRoomRequest
@@ -259,10 +261,11 @@ func (a *App) handleAdminTHMManualRooms(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "room name must be 120 characters or fewer", http.StatusBadRequest)
 			return
 		}
+		categories, _ := a.loadTHMSkillCategories()
 		var skills []string
 		seen := map[string]bool{}
 		for _, raw := range in.Skills {
-			category := canonicalTHMSkillCategory(raw)
+			category := canonicalTHMSkillCategory(categories, raw)
 			if category == "" {
 				http.Error(w, fmt.Sprintf("unknown skill category %q", raw), http.StatusBadRequest)
 				return
