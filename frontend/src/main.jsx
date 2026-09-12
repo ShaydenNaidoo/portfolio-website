@@ -934,6 +934,15 @@ const MENU_ART = Object.fromEntries(
   Object.entries(import.meta.glob('./assets/menus/*.{jpg,jpeg,png}', { eager: true, query: '?url', import: 'default' }))
     .map(([path, url]) => [path.replace(/^.*\/([^/]+)\.[a-z0-9]+$/i, '$1').toLowerCase(), url])
 )
+// Background music: drop files into src/assets/music (see its README).
+const MUSIC_TRACKS = Object.entries(import.meta.glob('./assets/music/*.{mp3,ogg,m4a}', { eager: true, query: '?url', import: 'default' }))
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([path, url]) => ({
+    url,
+    title: path.replace(/^.*\/([^/]+)\.[a-z0-9]+$/i, '$1').replace(/^\d+[-_ ]+/, '').replace(/[-_]+/g, ' ').trim()
+  }))
+const BGM_STORAGE_KEY = 'portfolio_bgm'
+
 const LANG_COLORS = {
   JavaScript: '#f1e05a', TypeScript: '#3178c6', Python: '#3572A5', Go: '#00ADD8',
   PHP: '#4F5D95', CSS: '#663399', HTML: '#e34c26', Shell: '#89e051', Bash: '#89e051',
@@ -1160,6 +1169,16 @@ function App() {
   const [loaded, setLoaded] = useState(false)
   const [contactStatus, setContactStatus] = useState('')
   const [contactBusy, setContactBusy] = useState(false)
+  const [musicOn, setMusicOn] = useState(() => {
+    try {
+      return MUSIC_TRACKS.length > 0 && window.localStorage.getItem(BGM_STORAGE_KEY) === 'on'
+    } catch {
+      return false
+    }
+  })
+  const [trackIndex, setTrackIndex] = useState(0)
+  const bgmRef = useRef(null)
+  const musicOnRef = useRef(false)
   const [thmSyncMeta, setThmSyncMeta] = useState(null)
   const [thmSyncForm, setThmSyncForm] = useState({ profile: '', skills: '', rooms: '' })
   const [thmSyncBusy, setThmSyncBusy] = useState(false)
@@ -1203,9 +1222,49 @@ function App() {
     }
   }
 
+  /* ---------- Background music ---------- */
+  const startMusic = () => {
+    const el = bgmRef.current
+    if (!el || !MUSIC_TRACKS.length) {
+      return
+    }
+    el.volume = 0.35
+    const p = el.play()
+    if (p && p.catch) {
+      p.catch(() => {}) // blocked until a user gesture; the unlock handler retries
+    }
+  }
+
+  const toggleMusic = () => {
+    const next = !musicOn
+    setMusicOn(next)
+    try {
+      window.localStorage.setItem(BGM_STORAGE_KEY, next ? 'on' : 'off')
+    } catch {
+      // storage unavailable; the choice just doesn't persist
+    }
+    playSelect()
+  }
+
+  useEffect(() => {
+    musicOnRef.current = musicOn
+    const el = bgmRef.current
+    if (!el) {
+      return
+    }
+    if (musicOn) {
+      startMusic()
+    } else {
+      el.pause()
+    }
+  }, [musicOn, trackIndex])
+
   useEffect(() => {
     const unlock = () => {
       audioUnlocked.current = true
+      if (musicOnRef.current && bgmRef.current?.paused) {
+        startMusic() // remembered "on" from a previous visit
+      }
     }
     window.addEventListener('pointerdown', unlock, { once: true, capture: true })
     window.addEventListener('keydown', unlock, { once: true, capture: true })
@@ -2009,12 +2068,18 @@ function App() {
   const menuItems = isAdminAuthenticated ? [...MENU_ITEMS, ADMIN_MENU_ITEM] : MENU_ITEMS
   const menuItemsRef = useRef(menuItems)
   menuItemsRef.current = menuItems
+  const toggleMusicRef = useRef(() => {})
+  toggleMusicRef.current = toggleMusic
 
   /* ---------- Keyboard: ↑↓ select · Enter confirm · Esc back ---------- */
   useEffect(() => {
     const onKey = (e) => {
       const tag = e.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+        return
+      }
+      if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        toggleMusicRef.current()
         return
       }
       if (routeRef.current === 'home') {
@@ -2364,6 +2429,14 @@ function App() {
       {/* Custom animated cursor + select sound */}
       <div id="cursor" aria-hidden="true" ref={cursorRef} />
       <audio ref={sfxRef} src={SELECT_SFX} preload="auto" />
+      {MUSIC_TRACKS.length > 0 && (
+        <audio
+          ref={bgmRef}
+          src={MUSIC_TRACKS[trackIndex % MUSIC_TRACKS.length].url}
+          preload="none"
+          onEnded={() => setTrackIndex((current) => (current + 1) % MUSIC_TRACKS.length)}
+        />
+      )}
 
       <div id="shell" className={loaded ? 'loaded' : ''}>
         <div id="hud-top">
@@ -3214,6 +3287,20 @@ function App() {
           <span><span className="key">↑↓</span>Select</span>
           <span><span className="key">Enter</span>Confirm</span>
           <span><span className="key">Esc</span>Back</span>
+          {MUSIC_TRACKS.length > 0 && (
+            <button
+              type="button"
+              id="bgm-toggle"
+              className={musicOn ? 'on' : ''}
+              onClick={toggleMusic}
+              aria-pressed={musicOn}
+              title={musicOn ? 'Music off (M)' : 'Music on (M)'}
+            >
+              <span className="key">M</span>
+              <span className="bgm-label">{musicOn ? '♪ BGM' : 'BGM off'}</span>
+              {musicOn && <span className="bgm-track">· {MUSIC_TRACKS[trackIndex % MUSIC_TRACKS.length].title}</span>}
+            </button>
+          )}
           <span id="clock">{clock}</span>
         </div>
       </div>

@@ -91,6 +91,15 @@ body[data-screen]:not([data-screen="home"]) #slash{
   border-radius:2px;
 }
 #clock{margin-left:auto;opacity:.8;}
+#bgm-toggle{
+  background:none;border:0;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;
+  cursor:pointer;display:inline-flex;align-items:center;padding:0;opacity:.85;
+}
+#bgm-toggle:hover{opacity:1;}
+#bgm-toggle.on .key{background:var(--red);color:var(--white);}
+#bgm-toggle.on .bgm-label{animation:bgmPulse 1.2s ease-in-out infinite;}
+#bgm-toggle .bgm-track{margin-left:6px;opacity:.75;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+@keyframes bgmPulse{0%,100%{opacity:1;}50%{opacity:.55;}}
 #stage{flex:1;position:relative;overflow:hidden;}
 
 /* ============ SCREENS ============ */
