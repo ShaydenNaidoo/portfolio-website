@@ -1062,6 +1062,122 @@ function MenuArt({ id, src, onReady }) {
   )
 }
 
+
+/* =====================================================================
+   Persona 5 calendar widget — port of the Rainmeter skin by Mive82
+   (github.com/Mive82/Persona-5-Calendar, WTFPL). Every layer is an
+   835x653 PNG drawn at the same origin, so the widget is just a stack.
+   ===================================================================== */
+
+const P5CAL_BASE = '/assets/p5cal'
+const P5CAL_TIMEZONE = 'Africa/Johannesburg'
+const P5CAL_LOCATION = { lat: -25.75, lon: 28.19 } // Pretoria
+const P5CAL_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+// Time of day, as in the skin: 1 Evening · 2 Early Morning · 3 Morning · 4 Daytime · 5 Afternoon · 6 Evening
+const p5TimeOfDay = (hour) => (hour < 1 ? 1 : hour < 7 ? 2 : hour < 11 ? 3 : hour < 14 ? 4 : hour < 19 ? 5 : hour < 21 ? 6 : 1)
+
+// Open-Meteo WMO weather code -> OpenWeatherMap icon code used by the art
+const p5WeatherIcon = (code, isDay) => {
+  const suffix = isDay ? 'd' : 'n'
+  let icon = '01'
+  if (code === 1) icon = '02'
+  else if (code === 2) icon = '03'
+  else if (code === 3) icon = '04'
+  else if (code === 45 || code === 48) icon = '50'
+  else if ((code >= 51 && code <= 57) || (code >= 80 && code <= 82)) icon = '09'
+  else if (code >= 61 && code <= 67) icon = '10'
+  else if ((code >= 71 && code <= 77) || code === 85 || code === 86) icon = '13'
+  else if (code >= 95) icon = '11'
+  return icon + suffix
+}
+
+const p5Now = () => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: P5CAL_TIMEZONE, hour12: false, weekday: 'long', month: 'numeric', day: 'numeric', hour: 'numeric'
+  }).formatToParts(new Date())
+  const get = (type) => parts.find((part) => part.type === type)?.value
+  return {
+    day: Number(get('day')),
+    month: Number(get('month')),
+    weekday: get('weekday'),
+    hour: Number(get('hour')) % 24
+  }
+}
+
+function P5Calendar() {
+  const [now, setNow] = useState(p5Now)
+  const [weather, setWeather] = useState('')
+  const [frame, setFrame] = useState(0)
+  const reduced = useReducedMotion()
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(p5Now()), 30000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${P5CAL_LOCATION.lat}&longitude=${P5CAL_LOCATION.lon}&current=weather_code,is_day&timezone=${encodeURIComponent(P5CAL_TIMEZONE)}`
+        const response = await fetch(url)
+        if (!response.ok) {
+          return
+        }
+        const payload = await response.json()
+        if (!cancelled && payload?.current) {
+          setWeather(p5WeatherIcon(Number(payload.current.weather_code), Number(payload.current.is_day) === 1))
+        }
+      } catch {
+        // no weather icon; the date still renders
+      }
+    }
+    load()
+    const id = setInterval(load, 30 * 60 * 1000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [])
+
+  // The skin animates the weather icon as a 3-frame loop
+  useEffect(() => {
+    if (reduced || !weather) {
+      return undefined
+    }
+    const id = setInterval(() => setFrame((current) => (current + 1) % 3), 500)
+    return () => clearInterval(id)
+  }, [reduced, weather])
+
+  const version = now.month < 3 ? 1 : 0 // inverted colours in Jan/Feb, like the game
+  const monthKey = now.day < 10 ? String(now.month) : `${now.month}00` // month art shifts left for 2-digit days
+  const weekday = P5CAL_WEEKDAYS.includes(now.weekday) ? now.weekday : 'Monday'
+  const tod = p5TimeOfDay(now.hour)
+  const iconSet = frame + (now.day < 10 ? 3 : 0)
+  const v = `${P5CAL_BASE}`
+  const layers = [
+    `${v}/Day/${version}/${now.day}Bottom.png`,
+    `${v}/Month/${version}/${monthKey}Bottom.png`,
+    `${v}/Week/${version}/${weekday}Bottom.png`,
+    `${v}/ToD/${version}/${tod}.png`,
+    weather ? `${v}/Weather/icons${iconSet}/${version}/${weather}.png` : null,
+    `${v}/Day/${version}/${now.day}.png`,
+    `${v}/Month/${version}/${monthKey}.png`,
+    `${v}/Week/${version}/${weekday}.png`,
+    `${v}/Day/${version}/${now.day}Top.png`,
+    `${v}/Month/${version}/${monthKey}Top.png`,
+    `${v}/Week/${version}/${weekday}Top.png`
+  ].filter(Boolean)
+
+  const todLabel = ['', 'Evening', 'Early Morning', 'Morning', 'Daytime', 'Afternoon', 'Evening'][tod]
+  return (
+    <div id="p5cal" role="img" aria-label={`${now.month}/${now.day} ${weekday}, ${todLabel}`}>
+      {layers.map((src) => <img key={src} src={src} alt="" draggable={false} />)}
+    </div>
+  )
+}
+
 function useClock() {
   const [time, setTime] = useState('')
   useEffect(() => {
@@ -2445,6 +2561,7 @@ function App() {
         </div>
 
         <div id="stage">
+          {route === 'home' && <P5Calendar />}
 
           {/* HOME */}
           <section className={`screen${route === 'home' ? ' active' : ''}`} id="screen-home" aria-label="Main menu">
