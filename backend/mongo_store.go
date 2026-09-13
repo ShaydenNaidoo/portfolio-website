@@ -25,6 +25,7 @@ type MongoStore struct {
 	thmManualRooms     *mongo.Collection
 	thmSkillCategories *mongo.Collection
 	repoOverrides      *mongo.Collection
+	images             *mongo.Collection
 }
 
 // Repo overrides are one small document keyed "current": the whole map as
@@ -176,6 +177,7 @@ func newMongoStore(uri string, databaseName string) (*MongoStore, error) {
 		thmManualRooms:     database.Collection("thm_manual_rooms"),
 		thmSkillCategories: database.Collection("thm_skill_categories"),
 		repoOverrides:      database.Collection("repo_overrides"),
+		images:             database.Collection("images"),
 	}
 
 	if err := store.ensureIndexes(ctx); err != nil {
@@ -201,6 +203,13 @@ func (m *MongoStore) ensureIndexes(ctx context.Context) error {
 		Options: unique,
 	}); err != nil {
 		return fmt.Errorf("mission index failed: %w", err)
+	}
+
+	if _, err := m.images.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "id", Value: 1}},
+		Options: unique,
+	}); err != nil {
+		return fmt.Errorf("image index failed: %w", err)
 	}
 
 	if _, err := m.moduleState.Indexes().CreateOne(ctx, mongo.IndexModel{

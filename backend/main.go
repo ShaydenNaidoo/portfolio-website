@@ -47,6 +47,7 @@ type Repo struct {
 	Languages []string `json:"languages,omitempty"`
 	Title     string   `json:"title,omitempty"`
 	Hidden    bool     `json:"hidden,omitempty"`
+	Image     string   `json:"image,omitempty"` // /api/images/<id> from an admin upload
 }
 
 type Certification struct {
@@ -97,6 +98,7 @@ type RepoOverride struct {
 	Title       string   `json:"title,omitempty"`
 	Languages   []string `json:"languages,omitempty"`
 	Hidden      bool     `json:"hidden,omitempty"`
+	Image       string   `json:"image,omitempty"`
 }
 
 // RepoOverrideRequest is a partial update: only fields present in the JSON
@@ -109,6 +111,7 @@ type RepoOverrideRequest struct {
 	Title       *string   `json:"title"`
 	Languages   *[]string `json:"languages"`
 	Hidden      *bool     `json:"hidden"`
+	Image       *string   `json:"image"` // "" clears; an https:// link or a URL from /api/admin/images
 }
 
 type THMSkill struct {
@@ -280,6 +283,9 @@ func main() {
 	mux.HandleFunc("/api/profile", app.handleProfile)
 	mux.HandleFunc("/api/repos", app.handleRepos)
 	mux.HandleFunc("/api/admin/repo/", app.handleRepoUpdate)
+	mux.HandleFunc("/api/images/", app.handleImage)
+	mux.HandleFunc("/api/admin/images", app.handleAdminImages)
+	mux.HandleFunc("/api/admin/images/", app.handleAdminImages)
 	mux.HandleFunc("/api/admin/refresh", app.handleRefresh)
 	mux.HandleFunc("/api/admin/login", app.handleAdminLogin)
 	mux.HandleFunc("/api/admin/logout", app.handleAdminLogout)
@@ -510,12 +516,33 @@ func (a *App) handleRepoUpdate(w http.ResponseWriter, r *http.Request) {
 	if in.Hidden != nil {
 		ov.Hidden = *in.Hidden
 	}
+	var staleImage string
+	if in.Image != nil {
+		next := strings.TrimSpace(*in.Image)
+		if next != "" {
+			if id := imageIDFromURL(next); id != "" {
+				next = imageURLPrefix + id // uploaded: store the relative path
+			} else if err := validateExternalImageURL(next); err != nil {
+				a.mu.Unlock()
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		if ov.Image != "" && ov.Image != next {
+			staleImage = imageIDFromURL(ov.Image)
+		}
+		ov.Image = next
+	}
 	a.overrides[name] = ov
 	err := a.saveOverrides()
 	a.mu.Unlock()
 	if err != nil {
 		http.Error(w, "failed to save repo settings", http.StatusInternalServerError)
 		return
+	}
+	// The replaced image is unreferenced now; free its space.
+	if staleImage != "" {
+		_ = a.deleteImage(staleImage)
 	}
 
 	// Re-apply overrides to the cached list without a GitHub round-trip so
@@ -564,6 +591,7 @@ func (a *App) applyRepoOverride(repo *Repo) {
 	repo.PinOrder = ov.PinOrder
 	repo.Title = ov.Title
 	repo.Hidden = ov.Hidden
+	repo.Image = ov.Image
 	if ov.Description != "" {
 		repo.Description = ov.Description
 	}

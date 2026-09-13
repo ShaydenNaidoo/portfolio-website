@@ -536,6 +536,53 @@ const normalizeBlogPost = (post, index) => {
   }
 }
 
+// Shrinks an image in the browser before upload: fit within maxDim and
+// re-encode as WebP (JPEG where WebP is unsupported). A phone photo of several
+// MB typically comes out at 100–200 KB, which is what keeps storage small.
+const compressImageFile = (file, { maxDim = 1280, quality = 0.82 } = {}) => new Promise((resolve, reject) => {
+  if (!file || !file.type.startsWith('image/')) {
+    reject(new Error('Please select an image file.'))
+    return
+  }
+  // Animated GIFs would lose their animation; keep them if already small.
+  if (file.type === 'image/gif' && file.size <= 1024 * 1024) {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('Could not read selected image.'))
+    reader.readAsDataURL(file)
+    return
+  }
+  const url = URL.createObjectURL(file)
+  const img = new Image()
+  img.onload = () => {
+    URL.revokeObjectURL(url)
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    let out = canvas.toDataURL('image/webp', quality)
+    if (!out.startsWith('data:image/webp')) {
+      out = canvas.toDataURL('image/jpeg', quality)
+    }
+    resolve(out)
+  }
+  img.onerror = () => {
+    URL.revokeObjectURL(url)
+    reject(new Error('Could not read selected image.'))
+  }
+  img.src = url
+})
+
+const resolveImageUrl = (value) => {
+  const src = String(value || '').trim()
+  if (!src) {
+    return ''
+  }
+  return src.startsWith('/api/') ? `${API}${src}` : src
+}
+
 const parseErrorMessage = async (response, fallback) => {
   const body = await response.text()
   const text = String(body || '').trim()
@@ -1590,8 +1637,43 @@ function App() {
       name: project.name,
       title: project.title || '',
       description: project.description === 'No description available yet.' ? '' : (project.description || ''),
-      languages: (project.languages || []).join(', ')
+      languages: (project.languages || []).join(', '),
+      image: project.customImage || ''
     })
+  }
+
+  const handleRepoImageUpload = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) {
+      return
+    }
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      setRepoNotice('Login is required.')
+      return
+    }
+    setRepoBusy(true)
+    setRepoNotice('Compressing…')
+    try {
+      const dataUrl = await compressImageFile(file, { maxDim: 1280, quality: 0.82 })
+      setRepoNotice('Uploading…')
+      const response = await fetch(`${API}/api/admin/images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ imageData: dataUrl, kind: 'repo' })
+      })
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response, 'Upload failed.'))
+      }
+      const payload = await response.json()
+      setRepoEdit((current) => (current ? { ...current, image: payload.url } : current))
+      setRepoNotice(`Image ready (${Math.round((payload.size || 0) / 1024)} KB). Save the card to apply it.`)
+    } catch (uploadError) {
+      setRepoNotice(uploadError.message || 'Upload failed.')
+    } finally {
+      setRepoBusy(false)
+    }
   }
 
   const handleRepoEditSave = async (event) => {
@@ -1602,7 +1684,8 @@ function App() {
     const ok = await saveRepoOverride(repoEdit.name, {
       title: repoEdit.title,
       description: repoEdit.description,
-      languages: repoEdit.languages.split(/[,\n]+/).map((item) => item.trim()).filter(Boolean)
+      languages: repoEdit.languages.split(/[,\n]+/).map((item) => item.trim()).filter(Boolean),
+      image: repoEdit.image.trim()
     })
     if (ok) {
       setRepoEdit(null)
@@ -1774,22 +1857,21 @@ function App() {
       event.target.value = ''
       return
     }
-    if (file.size > (4 * 1024 * 1024)) {
-      setComposerNotice('Image is too large (max 4MB).')
+    if (file.size > (25 * 1024 * 1024)) {
+      setComposerNotice('Image is too large (max 25MB).')
       event.target.value = ''
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = () => {
-      setComposerImageData(String(reader.result || ''))
-      setComposerClearImage(false)
-      setComposerNotice('')
-    }
-    reader.onerror = () => {
-      setComposerNotice('Could not read selected image.')
-    }
-    reader.readAsDataURL(file)
+    compressImageFile(file)
+      .then((dataUrl) => {
+        setComposerImageData(dataUrl)
+        setComposerClearImage(false)
+        setComposerNotice('')
+      })
+      .catch((readError) => {
+        setComposerNotice(readError.message || 'Could not read selected image.')
+      })
   }
 
   const resetComposer = () => {
@@ -2271,7 +2353,8 @@ function App() {
           languages,
           pushedAt: repo.pushedAt,
           stars: repo.stars,
-          image: projectImageFor(repo.name)
+          customImage: repo.image || '',
+          image: resolveImageUrl(repo.image) || projectImageFor(repo.name)
         }
       })
       .filter((project) => {
@@ -2820,7 +2903,28 @@ function App() {
                     onChange={(event) => setRepoEdit((current) => ({ ...current, languages: event.target.value }))}
                   />
                 </label>
+                <label className="field">
+                  <span>Card image — paste an https:// link (no storage used) or upload below (blank = default art)</span>
+                  <input
+                    type="text"
+                    placeholder="https://…/image.png"
+                    value={repoEdit.image}
+                    onChange={(event) => setRepoEdit((current) => ({ ...current, image: event.target.value }))}
+                  />
+                </label>
+                {repoEdit.image && (
+                  <div className="img-preview"><img src={resolveImageUrl(repoEdit.image)} alt="Card image preview" /></div>
+                )}
                 <div className="form-foot">
+                  <label className="upload-btn">
+                    <input type="file" accept="image/*" onChange={handleRepoImageUpload} disabled={repoBusy} />
+                    Upload image
+                  </label>
+                  {repoEdit.image && (
+                    <button type="button" className="cv-btn small" disabled={repoBusy} onClick={() => setRepoEdit((current) => ({ ...current, image: '' }))}>
+                      <span>Use default art</span>
+                    </button>
+                  )}
                   <button type="submit" className="cv-btn small" disabled={repoBusy}><span>{repoBusy ? 'Saving…' : 'Save card ➤'}</span></button>
                   <button type="button" className="cv-btn small" disabled={repoBusy} onClick={() => setRepoEdit(null)}><span>Cancel</span></button>
                 </div>
