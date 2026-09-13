@@ -67,6 +67,9 @@ type BlogPost struct {
 	Content   string `json:"content,omitempty" bson:"content,omitempty"`
 	ImageData string `json:"imageData,omitempty" bson:"imageData,omitempty"`
 	CreatedAt string `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	// Imported LinkedIn post: page link plus the official embed iframe URL.
+	LinkedInURL      string `json:"linkedinUrl,omitempty" bson:"linkedinUrl,omitempty"`
+	LinkedInEmbedURL string `json:"linkedinEmbedUrl,omitempty" bson:"linkedinEmbedUrl,omitempty"`
 }
 
 type SiteData struct {
@@ -105,16 +108,19 @@ type AdminLoginResponse struct {
 }
 
 type AdminBlogCreateRequest struct {
-	Content   string `json:"content"`
-	ImageData string `json:"imageData"`
+	Content     string `json:"content"`
+	ImageData   string `json:"imageData"`
+	LinkedInURL string `json:"linkedinUrl"`
 }
 
 // AdminBlogUpdateRequest edits an existing post. An empty imageData keeps the
 // current image; clearImage removes it.
 type AdminBlogUpdateRequest struct {
-	Content    string `json:"content"`
-	ImageData  string `json:"imageData"`
-	ClearImage bool   `json:"clearImage"`
+	Content       string `json:"content"`
+	ImageData     string `json:"imageData"`
+	ClearImage    bool   `json:"clearImage"`
+	LinkedInURL   string `json:"linkedinUrl"`
+	ClearLinkedIn bool   `json:"clearLinkedin"`
 }
 
 type App struct {
@@ -505,8 +511,13 @@ func (a *App) handleAdminBlogCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	content := strings.TrimSpace(in.Content)
-	if content == "" {
-		http.Error(w, "post content is required", http.StatusBadRequest)
+	linkedIn, err := parseLinkedInPost(in.LinkedInURL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if content == "" && linkedIn.EmbedURL == "" {
+		http.Error(w, "post content or a LinkedIn post link is required", http.StatusBadRequest)
 		return
 	}
 	if utf8Len(content) > 1000 {
@@ -533,6 +544,9 @@ func (a *App) handleAdminBlogCreate(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: now.Format(time.RFC3339),
 		Date:      now.Format("2006-01-02"),
 		Excerpt:   truncateRunes(content, 180),
+
+		LinkedInURL:      linkedIn.URL,
+		LinkedInEmbedURL: linkedIn.EmbedURL,
 	}
 
 	if a.mongoStore != nil {
@@ -580,16 +594,17 @@ func (a *App) handleAdminBlogItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		content := strings.TrimSpace(in.Content)
-		if content == "" {
-			http.Error(w, "post content is required", http.StatusBadRequest)
-			return
-		}
 		if utf8Len(content) > 1000 {
 			http.Error(w, "post content must be 1000 characters or fewer", http.StatusBadRequest)
 			return
 		}
 		imageData := strings.TrimSpace(in.ImageData)
 		if err := validateBlogImageData(imageData); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		linkedIn, err := parseLinkedInPost(in.LinkedInURL)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -614,6 +629,16 @@ func (a *App) handleAdminBlogItem(w http.ResponseWriter, r *http.Request) {
 			post.ImageData = ""
 		} else if imageData != "" {
 			post.ImageData = imageData
+		}
+		if in.ClearLinkedIn {
+			post.LinkedInURL, post.LinkedInEmbedURL = "", ""
+		} else if linkedIn.EmbedURL != "" {
+			post.LinkedInURL, post.LinkedInEmbedURL = linkedIn.URL, linkedIn.EmbedURL
+		}
+		if content == "" && post.LinkedInEmbedURL == "" {
+			a.mu.Unlock()
+			http.Error(w, "post content or a LinkedIn post link is required", http.StatusBadRequest)
+			return
 		}
 		if a.mongoStore != nil {
 			if err := a.mongoStore.UpsertBlogPost(post); err != nil {

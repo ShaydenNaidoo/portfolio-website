@@ -749,3 +749,7 @@ body.has-art-home #big-name .ch:not(.box):not(.boxw){
 }
 
 .blog-admin-actions{display:flex;gap:10px;align-items:center;justify-content:flex-end;margin-top:12px;}
+
+.linkedin-embed{position:relative;width:100%;background:var(--white,#fff);border:2px solid var(--ink,#111);margin-bottom:10px;}
+.linkedin-embed iframe{display:block;width:100%;height:520px;border:0;}
+@media (max-width:640px){.linkedin-embed iframe{height:440px;}}

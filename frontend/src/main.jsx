@@ -520,6 +520,8 @@ const normalizeBlogPost = (post, index) => {
   const createdAt = String(post?.createdAt || post?.date || '').trim()
   const id = String(post?.id || `post-${createdAt || 'legacy'}-${index}`)
   const link = String(post?.url || '').trim()
+  const linkedinUrl = String(post?.linkedinUrl || '').trim()
+  const linkedinEmbedUrl = String(post?.linkedinEmbedUrl || '').trim()
 
   return {
     id,
@@ -528,7 +530,9 @@ const normalizeBlogPost = (post, index) => {
     imageData,
     createdAt,
     dateLabel: formatBlogDate(createdAt),
-    link
+    link,
+    linkedinUrl,
+    linkedinEmbedUrl
   }
 }
 
@@ -1499,6 +1503,8 @@ function App() {
   const [composerBusy, setComposerBusy] = useState(false)
   const [composerNotice, setComposerNotice] = useState('')
   const [composerEditingId, setComposerEditingId] = useState('')
+  const [composerLinkedIn, setComposerLinkedIn] = useState('')
+  const [composerClearLinkedIn, setComposerClearLinkedIn] = useState(false)
   const [composerClearImage, setComposerClearImage] = useState(false)
   const [blogActionBusyId, setBlogActionBusyId] = useState('')
   const [missionControl, setMissionControl] = useState(null)
@@ -1694,6 +1700,8 @@ function App() {
     setComposerImageData('')
     setComposerClearImage(false)
     setComposerEditingId('')
+    setComposerLinkedIn('')
+    setComposerClearLinkedIn(false)
   }
 
   const handleStartEditPost = (post) => {
@@ -1701,6 +1709,8 @@ function App() {
     setComposerContent(post.content || '')
     setComposerImageData('')
     setComposerClearImage(false)
+    setComposerLinkedIn(post.linkedinUrl || '')
+    setComposerClearLinkedIn(false)
     setComposerNotice('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -1749,12 +1759,13 @@ function App() {
       setComposerNotice('Login is required to publish.')
       return
     }
-    if (!content) {
-      setComposerNotice('Post text is required.')
+    const editing = Boolean(composerEditingId)
+    const linkedinUrl = String(composerLinkedIn || '').trim()
+    if (!content && !linkedinUrl && !editing) {
+      setComposerNotice('Write some text or paste a LinkedIn post link.')
       return
     }
 
-    const editing = Boolean(composerEditingId)
     setComposerBusy(true)
     setComposerNotice('')
     try {
@@ -1769,7 +1780,9 @@ function App() {
           body: JSON.stringify({
             content,
             imageData: composerImageData,
-            clearImage: editing && composerClearImage
+            clearImage: editing && composerClearImage,
+            linkedinUrl: composerClearLinkedIn ? '' : linkedinUrl,
+            clearLinkedin: editing && composerClearLinkedIn
           })
         }
       )
@@ -2875,6 +2888,30 @@ function App() {
                     maxLength={1000}
                   />
                 </label>
+                <label className="field">
+                  <span>LinkedIn post (optional) — paste the post link or its embed code</span>
+                  <input
+                    type="text"
+                    value={composerLinkedIn}
+                    onChange={(event) => { setComposerLinkedIn(event.target.value); setComposerClearLinkedIn(false) }}
+                    placeholder="https://www.linkedin.com/posts/…-activity-…"
+                  />
+                </label>
+                {composerEditingId && (
+                  <p className="mission-meta" style={{ margin: '6px 0 0' }}>
+                    {composerClearLinkedIn
+                      ? 'The LinkedIn post will be detached.'
+                      : 'Clear the field and tick “Detach LinkedIn” below to remove an attached post.'}
+                    {' '}
+                    <label style={{ marginLeft: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={composerClearLinkedIn}
+                        onChange={(event) => setComposerClearLinkedIn(event.target.checked)}
+                      /> Detach LinkedIn
+                    </label>
+                  </p>
+                )}
                 {composerImageData && (
                   <div className="img-preview"><img src={composerImageData} alt="Selected blog upload preview" /></div>
                 )}
@@ -2922,8 +2959,21 @@ function App() {
                     key={post.id}
                     style={{ '--tilt': tiltFor(post.id), '--d': `${index * 70}ms` }}
                   >
-                    <Thumb src={post.imageData} alt="Blog post upload" />
-                    <span className="lang">{post.dateLabel}</span>
+                    {post.linkedinEmbedUrl ? (
+                      <div className="linkedin-embed">
+                        <iframe
+                          src={post.linkedinEmbedUrl}
+                          title="LinkedIn post"
+                          loading="lazy"
+                          allowFullScreen
+                          frameBorder="0"
+                        />
+                      </div>
+                    ) : (
+                      <Thumb src={post.imageData} alt="Blog post upload" />
+                    )}
+                    {post.linkedinEmbedUrl && post.imageData && <Thumb src={post.imageData} alt="Blog post upload" />}
+                    <span className="lang">{post.linkedinEmbedUrl ? `LinkedIn · ${post.dateLabel}` : post.dateLabel}</span>
                     <div className="byline">
                       <strong>{displayName}</strong>
                       <span>@{displayName.toLowerCase().replace(/\s+/g, '')}</span>
@@ -2934,6 +2984,12 @@ function App() {
                       <div className="meta">
                         <span>Link</span>
                         <a className="go" href={post.link} target="_blank" rel="noreferrer">Open ↗</a>
+                      </div>
+                    )}
+                    {post.linkedinUrl && (
+                      <div className="meta">
+                        <span>LinkedIn</span>
+                        <a className="go" href={post.linkedinUrl} target="_blank" rel="noreferrer">View on LinkedIn ↗</a>
                       </div>
                     )}
                     {isAdminAuthenticated && (
