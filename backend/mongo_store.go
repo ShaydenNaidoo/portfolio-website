@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -23,6 +24,51 @@ type MongoStore struct {
 	thmSnapshot        *mongo.Collection
 	thmManualRooms     *mongo.Collection
 	thmSkillCategories *mongo.Collection
+	repoOverrides      *mongo.Collection
+}
+
+// Repo overrides are one small document keyed "current": the whole map as
+// JSON, mirroring the on-disk file.
+type repoOverridesDoc struct {
+	ID   string `bson:"id"`
+	JSON string `bson:"json"`
+}
+
+func (m *MongoStore) LoadRepoOverrides() (map[string]RepoOverride, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	var doc repoOverridesDoc
+	err := m.repoOverrides.FindOne(ctx, bson.M{"id": "current"}).Decode(&doc)
+	if err != nil {
+		if strings.Contains(err.Error(), "no documents") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := map[string]RepoOverride{}
+	if strings.TrimSpace(doc.JSON) == "" {
+		return out, nil
+	}
+	if err := json.Unmarshal([]byte(doc.JSON), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (m *MongoStore) SaveRepoOverrides(overrides map[string]RepoOverride) error {
+	b, err := json.Marshal(overrides)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	_, err = m.repoOverrides.ReplaceOne(
+		ctx,
+		bson.M{"id": "current"},
+		repoOverridesDoc{ID: "current", JSON: string(b)},
+		options.Replace().SetUpsert(true),
+	)
+	return err
 }
 
 func (a *App) initMongoStoreFromEnv() {
@@ -129,6 +175,7 @@ func newMongoStore(uri string, databaseName string) (*MongoStore, error) {
 		thmSnapshot:        database.Collection("thm_snapshot"),
 		thmManualRooms:     database.Collection("thm_manual_rooms"),
 		thmSkillCategories: database.Collection("thm_skill_categories"),
+		repoOverrides:      database.Collection("repo_overrides"),
 	}
 
 	if err := store.ensureIndexes(ctx); err != nil {

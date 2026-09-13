@@ -42,6 +42,11 @@ type Repo struct {
 	Forks       int      `json:"forks"`
 	Pinned      bool     `json:"pinned"`
 	PinOrder    int      `json:"pinOrder"`
+	// Languages comes from GitHub's /languages endpoint (most-used first) or
+	// an admin override; Title and Hidden are admin overrides only.
+	Languages []string `json:"languages,omitempty"`
+	Title     string   `json:"title,omitempty"`
+	Hidden    bool     `json:"hidden,omitempty"`
 }
 
 type Certification struct {
@@ -85,10 +90,25 @@ type SiteData struct {
 }
 
 type RepoOverride struct {
-	Description string `json:"description"`
-	Readme      string `json:"readme"`
-	Pinned      bool   `json:"pinned"`
-	PinOrder    int    `json:"pinOrder"`
+	Description string   `json:"description"`
+	Readme      string   `json:"readme"`
+	Pinned      bool     `json:"pinned"`
+	PinOrder    int      `json:"pinOrder"`
+	Title       string   `json:"title,omitempty"`
+	Languages   []string `json:"languages,omitempty"`
+	Hidden      bool     `json:"hidden,omitempty"`
+}
+
+// RepoOverrideRequest is a partial update: only fields present in the JSON
+// body are applied, so the admin card editor can change one thing at a time.
+type RepoOverrideRequest struct {
+	Description *string   `json:"description"`
+	Readme      *string   `json:"readme"`
+	Pinned      *bool     `json:"pinned"`
+	PinOrder    *int      `json:"pinOrder"`
+	Title       *string   `json:"title"`
+	Languages   *[]string `json:"languages"`
+	Hidden      *bool     `json:"hidden"`
 }
 
 type THMSkill struct {
@@ -336,12 +356,30 @@ func (a *App) loadSiteData() {
 	}
 }
 
+const repoOverridesFile = "data/repo_overrides.json"
+
 func (a *App) loadOverrides() {
-	b, err := os.ReadFile("data/repo_overrides.json")
-	if err != nil {
+	if b, err := os.ReadFile(repoOverridesFile); err == nil {
+		_ = json.Unmarshal(b, &a.overrides)
+	}
+	if a.overrides == nil {
+		a.overrides = map[string]RepoOverride{}
+	}
+	if a.mongoStore == nil {
 		return
 	}
-	_ = json.Unmarshal(b, &a.overrides)
+	// Mongo wins when it has data; otherwise seed it from the committed file
+	// so the first boot against an empty database keeps existing settings.
+	stored, err := a.mongoStore.LoadRepoOverrides()
+	if err != nil {
+		fmt.Printf("Mongo repo overrides load failed, using JSON fallback: %v\n", err)
+		return
+	}
+	if len(stored) > 0 {
+		a.overrides = stored
+	} else if len(a.overrides) > 0 {
+		_ = a.mongoStore.SaveRepoOverrides(a.overrides)
+	}
 }
 
 func (a *App) saveOverrides() error {
@@ -349,7 +387,17 @@ func (a *App) saveOverrides() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile("data/repo_overrides.json", b, 0o644)
+	a.backup(repoOverridesFile, b, "Update repo card settings")
+	if a.mongoStore != nil {
+		if err := a.mongoStore.SaveRepoOverrides(a.overrides); err != nil {
+			return err
+		}
+	}
+	// Local copy doubles as the fallback and the git-backup seed.
+	if err := os.WriteFile(repoOverridesFile, b, 0o644); err != nil && a.mongoStore == nil {
+		return err
+	}
+	return nil
 }
 
 func (a *App) loadRepoCache() {
@@ -411,31 +459,123 @@ func (a *App) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]string{"status": "ok"})
 }
 
+// PUT    /api/admin/repo/<name>  partial override (title, description, languages, hidden, pinned…)
+// DELETE /api/admin/repo/<name>  hide the card (the repo stays on GitHub; PUT {"hidden":false} restores it)
 func (a *App) handleRepoUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	if !a.isAuthorizedAdmin(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	name := strings.TrimPrefix(r.URL.Path, "/api/admin/repo/")
+	name := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/admin/repo/"), "/")
 	if name == "" {
 		http.Error(w, "repo name required", http.StatusBadRequest)
 		return
 	}
-	var in RepoOverride
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
+
+	var in RepoOverrideRequest
+	switch r.Method {
+	case http.MethodPut, http.MethodPatch:
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&in); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+	case http.MethodDelete:
+		hidden := true
+		in.Hidden = &hidden
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
 	a.mu.Lock()
-	a.overrides[name] = in
-	_ = a.saveOverrides()
+	ov := a.overrides[name]
+	if in.Description != nil {
+		ov.Description = strings.TrimSpace(*in.Description)
+	}
+	if in.Readme != nil {
+		ov.Readme = *in.Readme
+	}
+	if in.Pinned != nil {
+		ov.Pinned = *in.Pinned
+	}
+	if in.PinOrder != nil {
+		ov.PinOrder = *in.PinOrder
+	}
+	if in.Title != nil {
+		ov.Title = strings.Join(strings.Fields(*in.Title), " ")
+	}
+	if in.Languages != nil {
+		ov.Languages = cleanLanguageList(*in.Languages)
+	}
+	if in.Hidden != nil {
+		ov.Hidden = *in.Hidden
+	}
+	a.overrides[name] = ov
+	err := a.saveOverrides()
 	a.mu.Unlock()
-	_ = a.refreshRepos()
-	respondJSON(w, map[string]string{"status": "updated"})
+	if err != nil {
+		http.Error(w, "failed to save repo settings", http.StatusInternalServerError)
+		return
+	}
+
+	// Re-apply overrides to the cached list without a GitHub round-trip so
+	// the change is visible immediately even when the API is rate-limited.
+	a.mu.Lock()
+	for i := range a.repos {
+		if a.repos[i].Name == name {
+			a.applyRepoOverride(&a.repos[i])
+		}
+	}
+	repos := append([]Repo(nil), a.repos...)
+	a.mu.Unlock()
+	_ = a.saveRepoCache(repos)
+
+	status := "updated"
+	if r.Method == http.MethodDelete {
+		status = "hidden"
+	}
+	respondJSON(w, map[string]any{"status": status, "override": ov})
+}
+
+// cleanLanguageList trims, de-duplicates (case-insensitively) and caps the
+// list of languages an admin can attach to a card.
+func cleanLanguageList(items []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		key := strings.ToLower(item)
+		if item == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, item)
+		if len(out) == 8 {
+			break
+		}
+	}
+	return out
+}
+
+// applyRepoOverride layers the admin's settings over what GitHub reported.
+func (a *App) applyRepoOverride(repo *Repo) {
+	ov := a.overrides[repo.Name]
+	repo.Pinned = ov.Pinned
+	repo.PinOrder = ov.PinOrder
+	repo.Title = ov.Title
+	repo.Hidden = ov.Hidden
+	if ov.Description != "" {
+		repo.Description = ov.Description
+	}
+	if ov.Readme != "" {
+		repo.Readme = ov.Readme
+	}
+	if len(ov.Languages) > 0 {
+		repo.Languages = ov.Languages
+		repo.Language = ov.Languages[0]
+	} else if repo.Language == "" && len(repo.Languages) > 0 {
+		repo.Language = repo.Languages[0]
+	}
 }
 
 func (a *App) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
@@ -804,17 +944,29 @@ func (a *App) refreshRepos() error {
 	if err = json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return err
 	}
+	// Previous languages, so a rate-limited /languages call degrades to the
+	// last known value instead of an empty chip.
+	a.mu.RLock()
+	previousLanguages := map[string][]string{}
+	for _, repo := range a.repos {
+		previousLanguages[repo.Name] = repo.Languages
+	}
+	a.mu.RUnlock()
+
 	out := make([]Repo, 0, len(raw))
 	for _, r := range raw {
 		name := asString(r["name"])
-		ov := a.overrides[name]
-		repo := Repo{ID: asInt64(r["id"]), Name: name, FullName: asString(r["full_name"]), URL: asString(r["html_url"]), Description: asString(r["description"]), Language: asString(r["language"]), PushedAt: asString(r["pushed_at"]), Stars: int(asInt64(r["stargazers_count"])), Forks: int(asInt64(r["forks_count"])), Topics: asStringSlice(r["topics"]), Pinned: ov.Pinned, PinOrder: ov.PinOrder}
-		if ov.Description != "" {
-			repo.Description = ov.Description
+		repo := Repo{ID: asInt64(r["id"]), Name: name, FullName: asString(r["full_name"]), URL: asString(r["html_url"]), Description: asString(r["description"]), Language: asString(r["language"]), PushedAt: asString(r["pushed_at"]), Stars: int(asInt64(r["stargazers_count"])), Forks: int(asInt64(r["forks_count"])), Topics: asStringSlice(r["topics"])}
+		// GitHub's primary "language" can be null even when the repo has
+		// code (HuntZA-Validator, for one); /languages is authoritative.
+		if langs, err := a.fetchRepoLanguages(client, repo.FullName); err == nil && len(langs) > 0 {
+			repo.Languages = langs
+		} else {
+			repo.Languages = previousLanguages[name]
 		}
-		if ov.Readme != "" {
-			repo.Readme = ov.Readme
-		}
+		a.mu.RLock()
+		a.applyRepoOverride(&repo)
+		a.mu.RUnlock()
 		out = append(out, repo)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -833,6 +985,41 @@ func (a *App) refreshRepos() error {
 		fmt.Printf("Unable to write repo cache: %v\n", err)
 	}
 	return nil
+}
+
+// fetchRepoLanguages returns the repo's languages ordered by bytes of code.
+func (a *App) fetchRepoLanguages(client *http.Client, fullName string) ([]string, error) {
+	if fullName == "" {
+		return nil, fmt.Errorf("missing repo name")
+	}
+	req, _ := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+fullName+"/languages", nil)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	if a.githubToken != "" {
+		req.Header.Set("Authorization", "Bearer "+a.githubToken)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("github languages failed: %d", resp.StatusCode)
+	}
+	var bytesByLang map[string]float64
+	if err := json.NewDecoder(resp.Body).Decode(&bytesByLang); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(bytesByLang))
+	for name := range bytesByLang {
+		names = append(names, name)
+	}
+	sort.SliceStable(names, func(i, j int) bool {
+		if bytesByLang[names[i]] != bytesByLang[names[j]] {
+			return bytesByLang[names[i]] > bytesByLang[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	return names, nil
 }
 
 func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {

@@ -753,3 +753,7 @@ body.has-art-home #big-name .ch:not(.box):not(.boxw){
 .linkedin-embed{position:relative;width:100%;background:var(--white,#fff);border:2px solid var(--ink,#111);margin-bottom:10px;}
 .linkedin-embed iframe{display:block;width:100%;height:520px;border:0;}
 @media (max-width:640px){.linkedin-embed iframe{height:440px;}}
+
+.repo-admin{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0 4px;}
+.repo-hidden-tag{font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:var(--red);}
+.card.repo-hidden{filter:grayscale(.85) contrast(.85);outline:3px dashed var(--red);outline-offset:-3px;}

@@ -1023,12 +1023,17 @@ function Thumb({ src, alt = '' }) {
   )
 }
 
-function ProjectCard({ project, index, featured }) {
+function ProjectCard({ project, index, featured, admin, onEdit, onHide, busy }) {
   const languages = projectLanguagesFor(project)
   const primary = languages[0] || project.language || 'Repo'
+  const stop = (handler) => (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    handler(project)
+  }
   return (
     <a
-      className={`card${featured ? ' feat' : ''}`}
+      className={`card${featured ? ' feat' : ''}${project.hidden ? ' repo-hidden' : ''}`}
       href={project.url || '#'}
       target="_blank"
       rel="noreferrer"
@@ -1036,8 +1041,17 @@ function ProjectCard({ project, index, featured }) {
     >
       <Thumb src={project.image} />
       <span className="lang">{primary}</span>
-      <h3>{splitTitle(prettyName(project.name))}</h3>
+      <h3>{splitTitle(project.title || prettyName(project.name))}</h3>
       <p>{project.description}</p>
+      {admin && (
+        <div className="repo-admin" aria-label="Card admin actions">
+          {project.hidden && <span className="repo-hidden-tag">Hidden from visitors</span>}
+          <button type="button" className="cv-btn small" disabled={busy} onClick={stop(onEdit)}><span>Edit</span></button>
+          <button type="button" className="mission-delete" disabled={busy} onClick={stop(onHide)}>
+            {project.hidden ? 'Restore' : 'Hide'}
+          </button>
+        </div>
+      )}
       {languages.length > 1 && (
         <div className="langs">
           {languages.map((language) => (
@@ -1526,6 +1540,88 @@ function App() {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
   })
+
+  const [repoEdit, setRepoEdit] = useState(null) // { name, title, description, languages }
+  const [repoBusy, setRepoBusy] = useState(false)
+  const [repoNotice, setRepoNotice] = useState('')
+
+  const reloadRepos = async () => {
+    try {
+      const response = await fetch(`${API}/api/repos`)
+      if (response.ok) {
+        const payload = await response.json()
+        setRepos(Array.isArray(payload) ? payload : [])
+      }
+    } catch {
+      // keep the current list
+    }
+  }
+
+  const saveRepoOverride = async (name, body, method = 'PUT') => {
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      setRepoNotice('Login is required.')
+      return false
+    }
+    setRepoBusy(true)
+    setRepoNotice('')
+    try {
+      const response = await fetch(`${API}/api/admin/repo/${encodeURIComponent(name)}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: method === 'DELETE' ? undefined : JSON.stringify(body)
+      })
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response, 'Could not save repo card.'))
+      }
+      await reloadRepos()
+      return true
+    } catch (saveError) {
+      setRepoNotice(saveError.message || 'Could not save repo card.')
+      return false
+    } finally {
+      setRepoBusy(false)
+    }
+  }
+
+  const handleRepoEditStart = (project) => {
+    setRepoNotice('')
+    setRepoEdit({
+      name: project.name,
+      title: project.title || '',
+      description: project.description === 'No description available yet.' ? '' : (project.description || ''),
+      languages: (project.languages || []).join(', ')
+    })
+  }
+
+  const handleRepoEditSave = async (event) => {
+    event.preventDefault()
+    if (!repoEdit) {
+      return
+    }
+    const ok = await saveRepoOverride(repoEdit.name, {
+      title: repoEdit.title,
+      description: repoEdit.description,
+      languages: repoEdit.languages.split(/[,\n]+/).map((item) => item.trim()).filter(Boolean)
+    })
+    if (ok) {
+      setRepoEdit(null)
+      setRepoNotice('Repo card updated.')
+      playSelect()
+    }
+  }
+
+  const handleRepoHideToggle = async (project) => {
+    if (!project.hidden && !window.confirm(`Hide “${project.title || prettyName(project.name)}” from the site? You can restore it later.`)) {
+      return
+    }
+    const ok = project.hidden
+      ? await saveRepoOverride(project.name, { hidden: false })
+      : await saveRepoOverride(project.name, null, 'DELETE')
+    if (ok) {
+      setRepoNotice(project.hidden ? 'Repo card restored.' : 'Repo card hidden.')
+    }
+  }
 
   const loadCoreData = async () => {
     setLoading(true)
@@ -2155,13 +2251,20 @@ function App() {
         const key = normalizeProjectKey(repo.name)
         const overrideLanguages = PROJECT_LANGUAGE_OVERRIDES[key]
         const overrideDescription = PROJECT_DESCRIPTION_OVERRIDES[key]
-        const languages = Array.isArray(overrideLanguages) && overrideLanguages.length
-          ? overrideLanguages
-          : (repo.language ? [repo.language] : undefined)
+        // Backend languages (admin override or GitHub's /languages) beat the
+        // hard-coded list, which beats GitHub's single primary language.
+        const backendLanguages = Array.isArray(repo.languages) ? repo.languages.filter(Boolean) : []
+        const languages = backendLanguages.length
+          ? backendLanguages
+          : Array.isArray(overrideLanguages) && overrideLanguages.length
+            ? overrideLanguages
+            : (repo.language ? [repo.language] : undefined)
         const overrideURL = PROJECT_URL_OVERRIDES[key]
 
         return {
           name: repo.name,
+          title: repo.title || '',
+          hidden: Boolean(repo.hidden),
           description: overrideDescription || repo.description || 'No description available yet.',
           url: overrideURL || repo.url,
           language: languages?.[0] || repo.language || 'Unknown',
@@ -2687,10 +2790,57 @@ function App() {
             </div>
             <div className="grid-label"><span className="bar" />All repositories</div>
             <div id="repo-status">{repoStatus}</div>
+            {isAdminAuthenticated && repoEdit && (
+              <form className="paper" style={{ maxWidth: 620, margin: '0 0 24px' }} onSubmit={handleRepoEditSave}>
+                <div className="form-head">Edit card · {repoEdit.name}</div>
+                <label className="field">
+                  <span>Title (blank = repo name)</span>
+                  <input
+                    type="text"
+                    maxLength={80}
+                    value={repoEdit.title}
+                    onChange={(event) => setRepoEdit((current) => ({ ...current, title: event.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Description (blank = GitHub description)</span>
+                  <textarea
+                    rows={3}
+                    maxLength={600}
+                    value={repoEdit.description}
+                    onChange={(event) => setRepoEdit((current) => ({ ...current, description: event.target.value }))}
+                  />
+                </label>
+                <label className="field">
+                  <span>Languages, most-used first, comma separated (blank = detect from GitHub)</span>
+                  <input
+                    type="text"
+                    placeholder="Python, Shell"
+                    value={repoEdit.languages}
+                    onChange={(event) => setRepoEdit((current) => ({ ...current, languages: event.target.value }))}
+                  />
+                </label>
+                <div className="form-foot">
+                  <button type="submit" className="cv-btn small" disabled={repoBusy}><span>{repoBusy ? 'Saving…' : 'Save card ➤'}</span></button>
+                  <button type="button" className="cv-btn small" disabled={repoBusy} onClick={() => setRepoEdit(null)}><span>Cancel</span></button>
+                </div>
+              </form>
+            )}
+            {isAdminAuthenticated && repoNotice && <div className="form-status" role="status" style={{ marginBottom: 16 }}>{repoNotice}</div>}
             <div id="repo-grid" className="grid">
-              {repoProjects.map((project, index) => (
-                <ProjectCard key={`repo-${project.name}`} project={project} index={index} />
-              ))}
+              {repoProjects
+                .filter((project) => isAdminAuthenticated || !project.hidden)
+                .map((project, index) => (
+                  <ProjectCard
+                    key={`repo-${project.name}`}
+                    project={project}
+                    index={index}
+                    admin={isAdminAuthenticated}
+                    busy={repoBusy}
+                    onEdit={handleRepoEditStart}
+                    onHide={handleRepoHideToggle}
+                  />
+                ))}
             </div>
           </section>
 
