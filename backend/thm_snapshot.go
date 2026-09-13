@@ -107,8 +107,9 @@ func (snap *THMSnapshot) payload() map[string]any {
 
 // buildTHMPayload assembles the /api/tryhackme data section from raw endpoint
 // results; it is shared by the live fetch and the manual admin sync.
-func (a *App) buildTHMPayload(profileData any, skillsData any, rooms []string, roomsCount int, roomsSource string) map[string]any {
+func (a *App) buildTHMPayload(profileData any, skillsData any, rooms []string, roomLinks map[string]string, roomsCount int, roomsSource string) map[string]any {
 	profileRooms := extractTHMRoomNames(profileData)
+	roomLinks = mergeRoomLinks(roomLinks, extractTHMRoomLinks(profileData))
 	profileRoomsCount, _ := extractTHMRoomCount(profileData)
 	completedRooms := mergeUniqueStrings(rooms, profileRooms)
 	if profileRoomsCount > roomsCount {
@@ -126,6 +127,7 @@ func (a *App) buildTHMPayload(profileData any, skillsData any, rooms []string, r
 		},
 		"skillsMatrix":         normalizeTHMSkills(skillsData),
 		"completedRooms":       completedRooms,
+		"completedRoomLinks":   roomLinks, // lower-cased room name -> tryhackme.com/room/<code>
 		"completedRoomsCount":  roomsCount,
 		"completedRoomsSource": roomsSource,
 	}
@@ -243,10 +245,12 @@ func (a *App) handleAdminTHMSnapshot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rooms := extractTHMRoomNames(roomsData)
+	roomLinks := extractTHMRoomLinks(roomsData)
 	roomsCount, _ := extractTHMRoomCount(roomsData)
 	roomsSource := "manual-sync"
 	if roomsData == nil && prevPayload != nil {
 		rooms = toStringSlice(prevPayload["completedRooms"])
+		roomLinks = toStringMap(prevPayload["completedRoomLinks"])
 		if n, ok := asFloat64(prevPayload["completedRoomsCount"]); ok {
 			roomsCount = int(n + 0.5)
 		}
@@ -260,7 +264,7 @@ func (a *App) handleAdminTHMSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload := a.buildTHMPayload(profileData, skillsData, rooms, roomsCount, roomsSource)
+	payload := a.buildTHMPayload(profileData, skillsData, rooms, roomLinks, roomsCount, roomsSource)
 	if err := a.saveTHMSnapshot(payload, "manual"); err != nil {
 		http.Error(w, "failed to save snapshot", http.StatusInternalServerError)
 		return

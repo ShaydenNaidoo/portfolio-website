@@ -2618,6 +2618,19 @@ function App() {
   const thmAvatar = useMemo(() => extractTHMAvatar(thmProfile), [thmProfile])
   const thmRank = useMemo(() => extractRank(thmData), [thmData])
   const thmRooms = useMemo(() => extractRooms(thmData), [thmData])
+  // Lower-cased room name -> tryhackme.com/room/<code>, when the payload knew the code.
+  const thmRoomLinks = useMemo(() => {
+    const raw = thmData?.completedRoomLinks
+    const out = {}
+    if (raw && typeof raw === 'object') {
+      for (const [name, link] of Object.entries(raw)) {
+        if (typeof link === 'string' && /^https:\/\/tryhackme\.com\//.test(link)) {
+          out[name.toLowerCase()] = link
+        }
+      }
+    }
+    return out
+  }, [thmData])
   const thmRoomCount = useMemo(() => extractRoomCount(thmData), [thmData])
   const thmSkills = useMemo(() => extractSkills(thmData), [thmData])
   const thmSkillMatrix = useMemo(() => buildTHMSkillMatrix(thmSkills), [thmSkills])
@@ -3273,7 +3286,16 @@ function App() {
                 <h3>Completed Rooms</h3>
                 {thmRooms.length ? (
                   <ul className="rooms">
-                    {thmRooms.map((room) => <li key={room} style={{ '--tilt': tiltFor(room) }}>{room}</li>)}
+                    {thmRooms.map((room) => {
+                      const link = thmRoomLinks[room.toLowerCase()]
+                      return (
+                        <li key={room} style={{ '--tilt': tiltFor(room) }} className={link ? 'has-link' : undefined}>
+                          {link
+                            ? <a href={link} target="_blank" rel="noreferrer" title={`Open ${room} on TryHackMe`}>{room}</a>
+                            : room}
+                        </li>
+                      )
+                    })}
                   </ul>
                 ) : (
                   <p className="note">No room names were returned by the current TryHackMe payload.</p>

@@ -760,3 +760,7 @@ body.has-art-home #big-name .ch:not(.box):not(.boxw){
 
 .admin-inline{margin:14px 0 22px;max-width:none;}
 .exp-edit{border-top:2px dashed var(--ink);padding:12px 0 6px;margin-top:8px;}
+
+.rooms li.has-link a{color:inherit;text-decoration:none;display:block;}
+.rooms li.has-link{cursor:pointer;}
+.rooms li.has-link:hover{background:var(--red);color:var(--white);}

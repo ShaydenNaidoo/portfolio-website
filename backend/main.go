@@ -1123,9 +1123,12 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	var fetchedRooms []string
 	var fetchedRoomsCount int
 	var roomsErr error
+	roomLinks := extractTHMRoomLinks(profileData)
 	roomsSource := "public-profile"
 	if canUsePrivateTHMEndpoints {
-		fetchedRooms, fetchedRoomsCount, roomsErr = a.fetchTHMCompletedRooms(client)
+		var liveLinks map[string]string
+		fetchedRooms, liveLinks, fetchedRoomsCount, roomsErr = a.fetchTHMCompletedRooms(client)
+		roomLinks = mergeRoomLinks(roomLinks, liveLinks)
 		if roomsErr == nil {
 			roomsSource = "/api/all-completed-rooms"
 		}
@@ -1150,6 +1153,7 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	if roomsErr != nil && snapPayload != nil {
 		if rooms := toStringSlice(snapPayload["completedRooms"]); len(rooms) > 0 {
 			fetchedRooms = rooms
+			roomLinks = mergeRoomLinks(roomLinks, toStringMap(snapPayload["completedRoomLinks"]))
 			if n, ok := asFloat64(snapPayload["completedRoomsCount"]); ok {
 				fetchedRoomsCount = int(n + 0.5)
 			}
@@ -1173,7 +1177,7 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	payload := a.buildTHMPayload(profileData, skillsData, fetchedRooms, fetchedRoomsCount, roomsSource)
+	payload := a.buildTHMPayload(profileData, skillsData, fetchedRooms, roomLinks, fetchedRoomsCount, roomsSource)
 	if profileErr != nil && !stale["profile"] {
 		payload["profileError"] = shortTHMError(profileErr)
 	}
@@ -1289,25 +1293,28 @@ func (a *App) thmCookieHeader() string {
 	return "connect.sid=" + session
 }
 
-func (a *App) fetchTHMCompletedRooms(client *http.Client) ([]string, int, error) {
+func (a *App) fetchTHMCompletedRooms(client *http.Client) ([]string, map[string]string, int, error) {
 	if strings.TrimSpace(a.thmUser) == "" {
-		return nil, 0, fmt.Errorf("missing THM username")
+		return nil, nil, 0, fmt.Errorf("missing THM username")
 	}
 
 	var out []string
+	links := map[string]string{}
 	expectedCount := 0
 
-	primaryRooms, primaryCount, primaryErr := a.fetchTHMCompletedRoomsFromAllCompletedEndpoint(client)
+	primaryRooms, primaryLinks, primaryCount, primaryErr := a.fetchTHMCompletedRoomsFromAllCompletedEndpoint(client)
 	out = mergeUniqueStrings(out, primaryRooms)
+	links = mergeRoomLinks(links, primaryLinks)
 	if primaryCount > expectedCount {
 		expectedCount = primaryCount
 	}
 
 	var fallbackErr error
 	if len(out) == 0 || primaryErr != nil {
-		fallbackRooms, fallbackCount, err := a.fetchTHMCompletedRoomsFromMyRoomsEndpoint(client)
+		fallbackRooms, fallbackLinks, fallbackCount, err := a.fetchTHMCompletedRoomsFromMyRoomsEndpoint(client)
 		fallbackErr = err
 		out = mergeUniqueStrings(out, fallbackRooms)
+		links = mergeRoomLinks(links, fallbackLinks)
 		if fallbackCount > expectedCount {
 			expectedCount = fallbackCount
 		}
@@ -1322,27 +1329,28 @@ func (a *App) fetchTHMCompletedRooms(client *http.Client) ([]string, int, error)
 	}
 
 	if len(out) > 0 {
-		return out, expectedCount, nil
+		return out, links, expectedCount, nil
 	}
 
 	if primaryErr != nil && fallbackErr != nil {
-		return nil, expectedCount, fmt.Errorf("all-completed-rooms failed: %v; my-rooms fallback failed: %v", primaryErr, fallbackErr)
+		return nil, nil, expectedCount, fmt.Errorf("all-completed-rooms failed: %v; my-rooms fallback failed: %v", primaryErr, fallbackErr)
 	}
 	if primaryErr != nil {
-		return nil, expectedCount, primaryErr
+		return nil, nil, expectedCount, primaryErr
 	}
 	if fallbackErr != nil {
-		return nil, expectedCount, fallbackErr
+		return nil, nil, expectedCount, fallbackErr
 	}
 
-	return out, expectedCount, nil
+	return out, links, expectedCount, nil
 }
 
-func (a *App) fetchTHMCompletedRoomsFromAllCompletedEndpoint(client *http.Client) ([]string, int, error) {
+func (a *App) fetchTHMCompletedRoomsFromAllCompletedEndpoint(client *http.Client) ([]string, map[string]string, int, error) {
 	const pageSize = thmRoomsPageSize
 	const maxPages = 40
 
 	var out []string
+	links := map[string]string{}
 	expectedCount := 0
 	var firstErr error
 
@@ -1357,6 +1365,7 @@ func (a *App) fetchTHMCompletedRoomsFromAllCompletedEndpoint(client *http.Client
 		}
 
 		pageRooms := extractTHMRoomNames(data)
+		links = mergeRoomLinks(links, extractTHMRoomLinks(data))
 		before := len(out)
 		out = mergeUniqueStrings(out, pageRooms)
 		added := len(out) - before
@@ -1376,16 +1385,17 @@ func (a *App) fetchTHMCompletedRoomsFromAllCompletedEndpoint(client *http.Client
 		expectedCount = len(out)
 	}
 	if len(out) == 0 && firstErr != nil {
-		return nil, expectedCount, firstErr
+		return nil, nil, expectedCount, firstErr
 	}
-	return out, expectedCount, nil
+	return out, links, expectedCount, nil
 }
 
-func (a *App) fetchTHMCompletedRoomsFromMyRoomsEndpoint(client *http.Client) ([]string, int, error) {
+func (a *App) fetchTHMCompletedRoomsFromMyRoomsEndpoint(client *http.Client) ([]string, map[string]string, int, error) {
 	const pageSize = 100
 	const maxPages = 20
 
 	var out []string
+	links := map[string]string{}
 	var firstErr error
 
 	for page := 1; page <= maxPages; page++ {
@@ -1400,6 +1410,7 @@ func (a *App) fetchTHMCompletedRoomsFromMyRoomsEndpoint(client *http.Client) ([]
 
 		pageRooms, hasNext := extractTHMCompletedRoomsFromMyRooms(data)
 		out = mergeUniqueStrings(out, pageRooms)
+		links = mergeRoomLinks(links, extractTHMRoomLinks(data))
 
 		if !hasNext {
 			break
@@ -1407,9 +1418,9 @@ func (a *App) fetchTHMCompletedRoomsFromMyRoomsEndpoint(client *http.Client) ([]
 	}
 
 	if len(out) == 0 && firstErr != nil {
-		return nil, 0, firstErr
+		return nil, nil, 0, firstErr
 	}
-	return out, len(out), nil
+	return out, links, len(out), nil
 }
 
 func (a *App) fetchTHMCompletedRoomCount(client *http.Client) (int, error) {
@@ -1592,6 +1603,84 @@ func extractTHMRoomNames(raw any) []string {
 	}
 
 	walk(raw, "")
+	return out
+}
+
+// extractTHMRoomLinks walks the same structures as extractTHMRoomNames and
+// maps each room name (lower-cased) to its TryHackMe page, derived from the
+// room code/slug or an explicit URL field.
+func extractTHMRoomLinks(raw any) map[string]string {
+	links := map[string]string{}
+	var walk func(node any)
+	walk = func(node any) {
+		switch t := node.(type) {
+		case map[string]any:
+			if looksLikeRoomObject(t) {
+				if name := extractTHMRoomNameFromMap(t); name != "" {
+					if link := thmRoomLinkFromMap(t); link != "" {
+						key := strings.ToLower(strings.TrimSpace(name))
+						if _, exists := links[key]; !exists {
+							links[key] = link
+						}
+					}
+				}
+			}
+			for _, child := range t {
+				walk(child)
+			}
+		case []any:
+			for _, child := range t {
+				walk(child)
+			}
+		}
+	}
+	walk(raw)
+	return links
+}
+
+func thmRoomLinkFromMap(m map[string]any) string {
+	if s, ok := pickFirstStringField(m, "url", "roomUrl", "roomURL", "link"); ok {
+		if strings.HasPrefix(s, "https://tryhackme.com/") {
+			return s
+		}
+	}
+	if code, ok := pickFirstStringField(m, "code", "roomCode", "roomcode", "slug"); ok {
+		code = strings.Trim(strings.TrimSpace(code), "/")
+		if code != "" && !strings.ContainsAny(code, " /?#") {
+			return "https://tryhackme.com/room/" + url.PathEscape(code)
+		}
+	}
+	return ""
+}
+
+func mergeRoomLinks(dst map[string]string, src map[string]string) map[string]string {
+	if dst == nil {
+		dst = map[string]string{}
+	}
+	for k, v := range src {
+		if _, exists := dst[k]; !exists && v != "" {
+			dst[k] = v
+		}
+	}
+	return dst
+}
+
+func toStringMap(v any) map[string]string {
+	out := map[string]string{}
+	switch m := v.(type) {
+	case map[string]string: // freshly built payload
+		for k, s := range m {
+			if s != "" {
+				out[k] = s
+			}
+		}
+	case map[string]any: // decoded from a stored snapshot
+		for k, item := range m {
+			if s, ok := item.(string); ok && s != "" {
+				out[k] = s
+			}
+		}
+	}
 	return out
 }
 

@@ -204,6 +204,13 @@ func (a *App) applyTHMCustomization(payload map[string]any) {
 	merged := mergeUniqueStrings(existing, names)
 	added := len(merged) - len(existing)
 	payload["completedRooms"] = merged
+	links := toStringMap(payload["completedRoomLinks"])
+	for _, room := range rooms {
+		if room.URL != "" {
+			links[strings.ToLower(strings.TrimSpace(room.Name))] = room.URL
+		}
+	}
+	payload["completedRoomLinks"] = links
 
 	count := 0
 	if n, ok := asFloat64(payload["completedRoomsCount"]); ok {
