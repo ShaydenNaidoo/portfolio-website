@@ -111,6 +111,7 @@ type AdminBlogCreateRequest struct {
 	Content     string `json:"content"`
 	ImageData   string `json:"imageData"`
 	LinkedInURL string `json:"linkedinUrl"`
+	Date        string `json:"date"` // YYYY-MM-DD; blank = LinkedIn post date, else today
 }
 
 // AdminBlogUpdateRequest edits an existing post. An empty imageData keeps the
@@ -121,6 +122,36 @@ type AdminBlogUpdateRequest struct {
 	ClearImage    bool   `json:"clearImage"`
 	LinkedInURL   string `json:"linkedinUrl"`
 	ClearLinkedIn bool   `json:"clearLinkedin"`
+	Date          string `json:"date"` // YYYY-MM-DD; blank = unchanged
+}
+
+// parseBlogDate accepts YYYY-MM-DD and returns midday UTC on that date so
+// the post sorts on the right day regardless of the viewer's timezone.
+func parseBlogDate(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("date must be in YYYY-MM-DD format")
+	}
+	if t.After(time.Now().Add(24 * time.Hour)) {
+		return time.Time{}, fmt.Errorf("date cannot be in the future")
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), 12, 0, 0, 0, time.UTC), nil
+}
+
+func (post *BlogPost) setPostedAt(t time.Time) {
+	post.CreatedAt = t.UTC().Format(time.RFC3339)
+	post.Date = t.UTC().Format("2006-01-02")
+}
+
+// sortBlogPostsLocked keeps newest first, matching the Mongo query order.
+func (a *App) sortBlogPostsLocked() {
+	sort.SliceStable(a.siteData.BlogPosts, func(i, j int) bool {
+		return a.siteData.BlogPosts[i].CreatedAt > a.siteData.BlogPosts[j].CreatedAt
+	})
 }
 
 type App struct {
@@ -531,7 +562,17 @@ func (a *App) handleAdminBlogCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC()
+	postedAt, err := parseBlogDate(in.Date)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if postedAt.IsZero() && !linkedIn.PostedAt.IsZero() {
+		postedAt = linkedIn.PostedAt
+	}
+	if postedAt.IsZero() {
+		postedAt = time.Now().UTC()
+	}
 	postIDToken, err := newSessionToken()
 	if err != nil {
 		http.Error(w, "failed to create post id", http.StatusInternalServerError)
@@ -541,8 +582,8 @@ func (a *App) handleAdminBlogCreate(w http.ResponseWriter, r *http.Request) {
 		ID:        "post-" + postIDToken[:12],
 		Content:   content,
 		ImageData: imageData,
-		CreatedAt: now.Format(time.RFC3339),
-		Date:      now.Format("2006-01-02"),
+		CreatedAt: postedAt.Format(time.RFC3339),
+		Date:      postedAt.Format("2006-01-02"),
 		Excerpt:   truncateRunes(content, 180),
 
 		LinkedInURL:      linkedIn.URL,
@@ -558,6 +599,7 @@ func (a *App) handleAdminBlogCreate(w http.ResponseWriter, r *http.Request) {
 
 	a.mu.Lock()
 	a.siteData.BlogPosts = append([]BlogPost{post}, a.siteData.BlogPosts...)
+	a.sortBlogPostsLocked()
 	// The JSON file is the primary store without MongoDB and a local backup
 	// (and migration seed) with it.
 	if err := a.saveSiteDataLocked(); err != nil && a.mongoStore == nil {
@@ -608,6 +650,11 @@ func (a *App) handleAdminBlogItem(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		postedAt, err := parseBlogDate(in.Date)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		a.mu.Lock()
 		idx := -1
@@ -640,6 +687,9 @@ func (a *App) handleAdminBlogItem(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "post content or a LinkedIn post link is required", http.StatusBadRequest)
 			return
 		}
+		if !postedAt.IsZero() {
+			post.setPostedAt(postedAt)
+		}
 		if a.mongoStore != nil {
 			if err := a.mongoStore.UpsertBlogPost(post); err != nil {
 				a.mu.Unlock()
@@ -648,6 +698,7 @@ func (a *App) handleAdminBlogItem(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		a.siteData.BlogPosts[idx] = post
+		a.sortBlogPostsLocked()
 		if err := a.saveSiteDataLocked(); err != nil && a.mongoStore == nil {
 			a.mu.Unlock()
 			http.Error(w, "failed to save blog post", http.StatusInternalServerError)

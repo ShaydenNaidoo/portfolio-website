@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // LinkedIn does not let ordinary apps read a member's posts (r_member_social
@@ -22,8 +24,27 @@ var (
 )
 
 type linkedInRef struct {
-	URL      string // canonical page link for "View on LinkedIn"
-	EmbedURL string // iframe src for LinkedIn's official embed
+	URL      string    // canonical page link for "View on LinkedIn"
+	EmbedURL string    // iframe src for LinkedIn's official embed
+	PostedAt time.Time // derived from the id; zero when unknown
+}
+
+// linkedInPostTime recovers the posting time from a LinkedIn post id: the
+// ids are snowflake-style, with the upper bits holding milliseconds since
+// the Unix epoch.
+func linkedInPostTime(id string) time.Time {
+	n, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	ms := int64(n >> 22)
+	t := time.UnixMilli(ms).UTC()
+	// Sanity window: LinkedIn ids of this shape only exist after ~2010, and
+	// nothing should be dated in the future.
+	if t.Year() < 2010 || t.After(time.Now().Add(24*time.Hour)) {
+		return time.Time{}
+	}
+	return t
 }
 
 // parseLinkedInPost accepts a post URL, a feed/update URL, a bare URN, or the
@@ -68,5 +89,6 @@ func parseLinkedInPost(raw string) (linkedInRef, error) {
 	return linkedInRef{
 		URL:      pageURL,
 		EmbedURL: "https://www.linkedin.com/embed/feed/update/" + urn,
+		PostedAt: linkedInPostTime(id),
 	}, nil
 }

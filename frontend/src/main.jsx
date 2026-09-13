@@ -1504,6 +1504,7 @@ function App() {
   const [composerNotice, setComposerNotice] = useState('')
   const [composerEditingId, setComposerEditingId] = useState('')
   const [composerLinkedIn, setComposerLinkedIn] = useState('')
+  const [composerDate, setComposerDate] = useState('')
   const [composerClearLinkedIn, setComposerClearLinkedIn] = useState(false)
   const [composerClearImage, setComposerClearImage] = useState(false)
   const [blogActionBusyId, setBlogActionBusyId] = useState('')
@@ -1702,6 +1703,7 @@ function App() {
     setComposerEditingId('')
     setComposerLinkedIn('')
     setComposerClearLinkedIn(false)
+    setComposerDate('')
   }
 
   const handleStartEditPost = (post) => {
@@ -1711,6 +1713,7 @@ function App() {
     setComposerClearImage(false)
     setComposerLinkedIn(post.linkedinUrl || '')
     setComposerClearLinkedIn(false)
+    setComposerDate(String(post.createdAt || '').slice(0, 10))
     setComposerNotice('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -1782,7 +1785,8 @@ function App() {
             imageData: composerImageData,
             clearImage: editing && composerClearImage,
             linkedinUrl: composerClearLinkedIn ? '' : linkedinUrl,
-            clearLinkedin: editing && composerClearLinkedIn
+            clearLinkedin: editing && composerClearLinkedIn,
+            date: composerDate
           })
         }
       )
@@ -2895,6 +2899,15 @@ function App() {
                     value={composerLinkedIn}
                     onChange={(event) => { setComposerLinkedIn(event.target.value); setComposerClearLinkedIn(false) }}
                     placeholder="https://www.linkedin.com/posts/…-activity-…"
+                  />
+                </label>
+                <label className="field">
+                  <span>Post date (optional — blank uses the LinkedIn post's date, or today)</span>
+                  <input
+                    type="date"
+                    value={composerDate}
+                    max={normalizeDateOnly(new Date())}
+                    onChange={(event) => setComposerDate(event.target.value)}
                   />
                 </label>
                 {composerEditingId && (
