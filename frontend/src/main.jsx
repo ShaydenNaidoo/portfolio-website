@@ -2240,7 +2240,7 @@ function App() {
   const blogFeed = useMemo(
     () => blogPosts
       .map((post, index) => normalizeBlogPost(post, index))
-      .filter((post) => post.title || post.content || post.imageData || post.link),
+      .filter((post) => post.title || post.content || post.imageData || post.link || post.linkedinEmbedUrl),
     [blogPosts]
   )
   const missionItems = Array.isArray(missionControl?.missions) ? missionControl.missions : []
