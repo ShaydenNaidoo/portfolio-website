@@ -1730,7 +1730,9 @@ function App() {
       })
       setComposerContent('')
       setComposerImageData('')
-      setComposerNotice('Post published.')
+      setComposerNotice(payload?.storage === 'json-file'
+        ? 'Post published — WARNING: saved to a JSON file only (MongoDB not connected); it will be lost on the next deploy.'
+        : 'Post published.')
     } catch (publishError) {
       setComposerNotice(publishError.message || 'Failed to publish post.')
     } finally {

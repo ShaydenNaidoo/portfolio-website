@@ -34,13 +34,33 @@ func (a *App) initMongoStoreFromEnv() {
 		databaseName = "portfolio"
 	}
 
-	store, err := newMongoStore(uri, databaseName)
-	if err != nil {
-		fmt.Printf("MongoDB init failed (fallback to JSON storage): %v\n", err)
-		return
+	// The JSON fallback lives on an ephemeral disk in production, so a single
+	// failed ping at boot (Atlas cold start, brief network blip) must not
+	// silently downgrade the whole process to storage that is wiped on the
+	// next deploy. Retry a few times before giving up.
+	const attempts = 4
+	for attempt := 1; attempt <= attempts; attempt++ {
+		store, err := newMongoStore(uri, databaseName)
+		if err == nil {
+			a.mongoStore = store
+			fmt.Printf("MongoDB storage enabled (database=%s)\n", databaseName)
+			return
+		}
+		fmt.Printf("MongoDB init attempt %d/%d failed: %v\n", attempt, attempts, err)
+		if attempt < attempts {
+			time.Sleep(time.Duration(attempt*5) * time.Second)
+		}
 	}
-	a.mongoStore = store
-	fmt.Printf("MongoDB storage enabled (database=%s)\n", databaseName)
+	fmt.Println("WARNING: MongoDB unavailable; falling back to JSON storage. Blog posts, missions and TryHackMe data saved now will be lost on the next deploy.")
+}
+
+// storageMode is reported to the admin UI so it is obvious when writes are
+// going to the ephemeral JSON files instead of MongoDB.
+func (a *App) storageMode() string {
+	if a.mongoStore != nil {
+		return "mongodb"
+	}
+	return "json-file"
 }
 
 func newMongoStore(uri string, databaseName string) (*MongoStore, error) {

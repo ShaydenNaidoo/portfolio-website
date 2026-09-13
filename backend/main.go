@@ -252,6 +252,14 @@ func (a *App) loadSiteData() {
 		posts, err := a.mongoStore.LoadBlogPosts()
 		if err != nil {
 			fmt.Printf("Mongo blog load failed, using JSON fallback: %v\n", err)
+		} else if len(posts) == 0 && len(a.siteData.BlogPosts) > 0 {
+			// First boot against an empty database: carry over posts that
+			// were written to the JSON file so nothing is lost in the switch.
+			for _, post := range a.siteData.BlogPosts {
+				if err := a.mongoStore.UpsertBlogPost(post); err != nil {
+					fmt.Printf("Mongo blog seed failed for %s: %v\n", post.ID, err)
+				}
+			}
 		} else {
 			a.siteData.BlogPosts = posts
 		}
@@ -441,6 +449,7 @@ func (a *App) handleAdminSession(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]any{
 		"authenticated": true,
 		"username":      a.adminUsername,
+		"storage":       a.storageMode(),
 	})
 }
 
@@ -500,18 +509,19 @@ func (a *App) handleAdminBlogCreate(w http.ResponseWriter, r *http.Request) {
 
 	a.mu.Lock()
 	a.siteData.BlogPosts = append([]BlogPost{post}, a.siteData.BlogPosts...)
-	if a.mongoStore == nil {
-		if err := a.saveSiteDataLocked(); err != nil {
-			a.mu.Unlock()
-			http.Error(w, "failed to save blog post", http.StatusInternalServerError)
-			return
-		}
+	// The JSON file is the primary store without MongoDB and a local backup
+	// (and migration seed) with it.
+	if err := a.saveSiteDataLocked(); err != nil && a.mongoStore == nil {
+		a.mu.Unlock()
+		http.Error(w, "failed to save blog post", http.StatusInternalServerError)
+		return
 	}
 	a.mu.Unlock()
 
 	respondJSON(w, map[string]any{
-		"status": "created",
-		"post":   post,
+		"status":  "created",
+		"post":    post,
+		"storage": a.storageMode(),
 	})
 }
 
