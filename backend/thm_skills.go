@@ -70,12 +70,13 @@ func (a *App) saveTHMSkillCategories(categories []THMSkillCategory) error {
 	for i := range categories {
 		categories[i].Order = i
 	}
-	if a.mongoStore != nil {
-		return a.mongoStore.ReplaceTHMSkillCategories(categories)
-	}
 	b, err := json.MarshalIndent(categories, "", "  ")
 	if err != nil {
 		return err
+	}
+	a.backup(thmSkillCategoriesFile, b, "Update TryHackMe skill categories")
+	if a.mongoStore != nil {
+		return a.mongoStore.ReplaceTHMSkillCategories(categories)
 	}
 	return os.WriteFile(thmSkillCategoriesFile, b, 0o644)
 }

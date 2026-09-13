@@ -108,6 +108,14 @@ type AdminBlogCreateRequest struct {
 	ImageData string `json:"imageData"`
 }
 
+// AdminBlogUpdateRequest edits an existing post. An empty imageData keeps the
+// current image; clearImage removes it.
+type AdminBlogUpdateRequest struct {
+	Content    string `json:"content"`
+	ImageData  string `json:"imageData"`
+	ClearImage bool   `json:"clearImage"`
+}
+
 type App struct {
 	mu                sync.RWMutex
 	repos             []Repo
@@ -126,6 +134,7 @@ type App struct {
 	adminPasswordHash string
 	adminSessions     map[string]time.Time
 	loginLimiter      *loginLimiter
+	gitBackup         *gitBackup
 	thmCacheBody      []byte
 	thmCacheExpiresAt time.Time
 }
@@ -176,7 +185,9 @@ func main() {
 	if app.githubUser == "" {
 		app.githubUser = "octocat"
 	}
+	app.gitBackup = newGitBackupFromEnv(app.githubToken)
 	app.initMongoStoreFromEnv()
+	app.startMongoKeepAlive()
 	app.loadSiteData()
 	app.loadOverrides()
 	app.loadMissionControl()
@@ -188,6 +199,7 @@ func main() {
 	}()
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/health", app.handleHealth)
 	mux.HandleFunc("/api/profile", app.handleProfile)
 	mux.HandleFunc("/api/repos", app.handleRepos)
 	mux.HandleFunc("/api/admin/repo/", app.handleRepoUpdate)
@@ -196,6 +208,7 @@ func main() {
 	mux.HandleFunc("/api/admin/logout", app.handleAdminLogout)
 	mux.HandleFunc("/api/admin/session", app.handleAdminSession)
 	mux.HandleFunc("/api/admin/blog", app.handleAdminBlogCreate)
+	mux.HandleFunc("/api/admin/blog/", app.handleAdminBlogItem)
 	mux.HandleFunc("/api/admin/mission-control", app.handleAdminMissionControl)
 	mux.HandleFunc("/api/admin/mission-control/", app.handleAdminMissionControlSubroute)
 	mux.HandleFunc("/api/admin/tryhackme/snapshot", app.handleAdminTHMSnapshot)
@@ -309,6 +322,7 @@ func (a *App) saveSiteDataLocked() error {
 	if err != nil {
 		return err
 	}
+	a.backup("data/site_data.json", b, "Update site data (blog posts)")
 	return os.WriteFile("data/site_data.json", b, 0o644)
 }
 
@@ -450,6 +464,7 @@ func (a *App) handleAdminSession(w http.ResponseWriter, r *http.Request) {
 		"authenticated": true,
 		"username":      a.adminUsername,
 		"storage":       a.storageMode(),
+		"gitBackup":     a.gitBackupStatus(),
 	})
 }
 
@@ -523,6 +538,113 @@ func (a *App) handleAdminBlogCreate(w http.ResponseWriter, r *http.Request) {
 		"post":    post,
 		"storage": a.storageMode(),
 	})
+}
+
+// handleAdminBlogItem edits (PUT) or removes (DELETE) /api/admin/blog/<id>.
+func (a *App) handleAdminBlogItem(w http.ResponseWriter, r *http.Request) {
+	if !a.isAuthorizedAdmin(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/admin/blog/"), "/")
+	if id == "" {
+		http.Error(w, "post id is required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut, http.MethodPatch:
+		var in AdminBlogUpdateRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&in); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		content := strings.TrimSpace(in.Content)
+		if content == "" {
+			http.Error(w, "post content is required", http.StatusBadRequest)
+			return
+		}
+		if utf8Len(content) > 1000 {
+			http.Error(w, "post content must be 1000 characters or fewer", http.StatusBadRequest)
+			return
+		}
+		imageData := strings.TrimSpace(in.ImageData)
+		if err := validateBlogImageData(imageData); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		a.mu.Lock()
+		idx := -1
+		for i := range a.siteData.BlogPosts {
+			if a.siteData.BlogPosts[i].ID == id {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			a.mu.Unlock()
+			http.Error(w, "post not found", http.StatusNotFound)
+			return
+		}
+		post := a.siteData.BlogPosts[idx]
+		post.Content = content
+		post.Excerpt = truncateRunes(content, 180)
+		if in.ClearImage {
+			post.ImageData = ""
+		} else if imageData != "" {
+			post.ImageData = imageData
+		}
+		if a.mongoStore != nil {
+			if err := a.mongoStore.UpsertBlogPost(post); err != nil {
+				a.mu.Unlock()
+				http.Error(w, "failed to save blog post", http.StatusInternalServerError)
+				return
+			}
+		}
+		a.siteData.BlogPosts[idx] = post
+		if err := a.saveSiteDataLocked(); err != nil && a.mongoStore == nil {
+			a.mu.Unlock()
+			http.Error(w, "failed to save blog post", http.StatusInternalServerError)
+			return
+		}
+		a.mu.Unlock()
+		respondJSON(w, map[string]any{"status": "updated", "post": post, "storage": a.storageMode()})
+
+	case http.MethodDelete:
+		if a.mongoStore != nil {
+			if err := a.mongoStore.DeleteBlogPost(id); err != nil {
+				http.Error(w, "failed to delete blog post", http.StatusInternalServerError)
+				return
+			}
+		}
+		a.mu.Lock()
+		kept := make([]BlogPost, 0, len(a.siteData.BlogPosts))
+		found := false
+		for _, post := range a.siteData.BlogPosts {
+			if post.ID == id {
+				found = true
+				continue
+			}
+			kept = append(kept, post)
+		}
+		if !found && a.mongoStore == nil {
+			a.mu.Unlock()
+			http.Error(w, "post not found", http.StatusNotFound)
+			return
+		}
+		a.siteData.BlogPosts = kept
+		if err := a.saveSiteDataLocked(); err != nil && a.mongoStore == nil {
+			a.mu.Unlock()
+			http.Error(w, "failed to delete blog post", http.StatusInternalServerError)
+			return
+		}
+		a.mu.Unlock()
+		respondJSON(w, map[string]any{"status": "deleted", "id": id, "storage": a.storageMode()})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (a *App) cleanExpiredAdminSessionsLocked(now time.Time) {
@@ -669,7 +791,7 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	// Fall back to the stored snapshot for whichever parts failed live.
-	snapshot, _ := a.loadTHMSnapshot()
+	snapshot, snapshotErr := a.loadTHMSnapshot()
 	snapPayload := snapshot.payload()
 	stale := map[string]bool{}
 	if profileErr != nil && snapPayload != nil && snapPayload["publicProfile"] != nil {
@@ -722,7 +844,9 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 	// Everything that came back live is worth keeping for next time, unless
 	// the admin pasted a manual snapshot: that one carries the full skills and
 	// room data the public endpoint lacks, so a live profile must not replace it.
-	if profileErr == nil && (snapshot == nil || snapshot.Source != "manual") {
+	// A failed snapshot read must not be mistaken for "no snapshot" either,
+	// or the live payload would silently replace whatever is stored.
+	if profileErr == nil && snapshotErr == nil && (snapshot == nil || snapshot.Source != "manual") {
 		_ = a.saveTHMSnapshot(payload, "live")
 	}
 	a.applyTHMCustomization(payload)

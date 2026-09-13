@@ -1498,6 +1498,9 @@ function App() {
   const [composerImageData, setComposerImageData] = useState('')
   const [composerBusy, setComposerBusy] = useState(false)
   const [composerNotice, setComposerNotice] = useState('')
+  const [composerEditingId, setComposerEditingId] = useState('')
+  const [composerClearImage, setComposerClearImage] = useState(false)
+  const [blogActionBusyId, setBlogActionBusyId] = useState('')
   const [missionControl, setMissionControl] = useState(null)
   const [missionLoading, setMissionLoading] = useState(false)
   const [missionBusy, setMissionBusy] = useState(false)
@@ -1677,12 +1680,65 @@ function App() {
     const reader = new FileReader()
     reader.onload = () => {
       setComposerImageData(String(reader.result || ''))
+      setComposerClearImage(false)
       setComposerNotice('')
     }
     reader.onerror = () => {
       setComposerNotice('Could not read selected image.')
     }
     reader.readAsDataURL(file)
+  }
+
+  const resetComposer = () => {
+    setComposerContent('')
+    setComposerImageData('')
+    setComposerClearImage(false)
+    setComposerEditingId('')
+  }
+
+  const handleStartEditPost = (post) => {
+    setComposerEditingId(post.id)
+    setComposerContent(post.content || '')
+    setComposerImageData('')
+    setComposerClearImage(false)
+    setComposerNotice('')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleDeleteBlogPost = async (post) => {
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      setComposerNotice('Login is required.')
+      return
+    }
+    if (!window.confirm('Delete this post? This cannot be undone.')) {
+      return
+    }
+    setBlogActionBusyId(post.id)
+    try {
+      const response = await fetch(`${API}/api/admin/blog/${encodeURIComponent(post.id)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!response.ok) {
+        throw new Error(await parseErrorMessage(response, 'Failed to delete post.'))
+      }
+      setProfile((current) => {
+        const next = current && typeof current === 'object' ? { ...current } : {}
+        const existing = Array.isArray(next.blogPosts) ? next.blogPosts : []
+        next.blogPosts = existing.filter((item) => String(item?.id || '') !== post.id)
+        return next
+      })
+      if (composerEditingId === post.id) {
+        resetComposer()
+      }
+      setComposerNotice('Post deleted.')
+      playSelect()
+    } catch (deleteError) {
+      setComposerNotice(deleteError.message || 'Failed to delete post.')
+    } finally {
+      setBlogActionBusyId('')
+    }
   }
 
   const handleCreateBlogPost = async (event) => {
@@ -1698,41 +1754,48 @@ function App() {
       return
     }
 
+    const editing = Boolean(composerEditingId)
     setComposerBusy(true)
     setComposerNotice('')
     try {
-      const response = await fetch(`${API}/api/admin/blog`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          content,
-          imageData: composerImageData
-        })
-      })
+      const response = await fetch(
+        editing ? `${API}/api/admin/blog/${encodeURIComponent(composerEditingId)}` : `${API}/api/admin/blog`,
+        {
+          method: editing ? 'PUT' : 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            content,
+            imageData: composerImageData,
+            clearImage: editing && composerClearImage
+          })
+        }
+      )
       if (!response.ok) {
-        throw new Error(await parseErrorMessage(response, 'Failed to publish post.'))
+        throw new Error(await parseErrorMessage(response, editing ? 'Failed to save post.' : 'Failed to publish post.'))
       }
 
       const payload = await response.json()
-      const createdPost = payload?.post || null
-      if (!createdPost) {
-        throw new Error('Publish succeeded but returned no post payload.')
+      const savedPost = payload?.post || null
+      if (!savedPost) {
+        throw new Error('Save succeeded but returned no post payload.')
       }
 
       setProfile((current) => {
         const next = current && typeof current === 'object' ? { ...current } : {}
         const existing = Array.isArray(next.blogPosts) ? next.blogPosts : []
-        next.blogPosts = [createdPost, ...existing]
+        next.blogPosts = editing
+          ? existing.map((item) => (String(item?.id || '') === savedPost.id ? savedPost : item))
+          : [savedPost, ...existing]
         return next
       })
-      setComposerContent('')
-      setComposerImageData('')
+      resetComposer()
+      const done = editing ? 'Post updated.' : 'Post published.'
       setComposerNotice(payload?.storage === 'json-file'
-        ? 'Post published — WARNING: saved to a JSON file only (MongoDB not connected); it will be lost on the next deploy.'
-        : 'Post published.')
+        ? `${done} WARNING: saved to a JSON file only (MongoDB not connected); it will be lost on the next deploy.`
+        : done)
     } catch (publishError) {
       setComposerNotice(publishError.message || 'Failed to publish post.')
     } finally {
@@ -2801,7 +2864,7 @@ function App() {
 
             {isAdminAuthenticated && (
               <form className="paper" style={{ maxWidth: 620 }} onSubmit={handleCreateBlogPost}>
-                <div className="form-head">Write a post</div>
+                <div className="form-head">{composerEditingId ? 'Edit post' : 'Write a post'}</div>
                 <label className="field">
                   <span>Update</span>
                   <textarea
@@ -2815,14 +2878,36 @@ function App() {
                 {composerImageData && (
                   <div className="img-preview"><img src={composerImageData} alt="Selected blog upload preview" /></div>
                 )}
+                {composerEditingId && !composerImageData && (
+                  <p className="mission-meta" style={{ margin: '6px 0 0' }}>
+                    {composerClearImage
+                      ? 'The current image will be removed.'
+                      : 'The current image is kept unless you upload a new one.'}
+                  </p>
+                )}
                 <div className="form-foot">
                   <label className="upload-btn">
                     <input type="file" accept="image/*" onChange={handleComposerImageChange} />
                     Upload image
                   </label>
+                  {composerEditingId && (
+                    <button
+                      type="button"
+                      className="cv-btn small"
+                      disabled={composerBusy}
+                      onClick={() => { setComposerImageData(''); setComposerClearImage((current) => !current) }}
+                    >
+                      <span>{composerClearImage ? 'Keep image' : 'Remove image'}</span>
+                    </button>
+                  )}
                   <button type="submit" className="cv-btn small" disabled={composerBusy}>
-                    <span>{composerBusy ? 'Publishing…' : 'Publish ➤'}</span>
+                    <span>{composerBusy ? 'Saving…' : (composerEditingId ? 'Save changes ➤' : 'Publish ➤')}</span>
                   </button>
+                  {composerEditingId && (
+                    <button type="button" className="cv-btn small" disabled={composerBusy} onClick={resetComposer}>
+                      <span>Cancel</span>
+                    </button>
+                  )}
                   {composerNotice && <div className="form-status" role="status">{composerNotice}</div>}
                 </div>
               </form>
@@ -2849,6 +2934,27 @@ function App() {
                       <div className="meta">
                         <span>Link</span>
                         <a className="go" href={post.link} target="_blank" rel="noreferrer">Open ↗</a>
+                      </div>
+                    )}
+                    {isAdminAuthenticated && (
+                      <div className="meta blog-admin-actions">
+                        <button
+                          type="button"
+                          className="cv-btn small"
+                          disabled={composerBusy || blogActionBusyId === post.id}
+                          onClick={() => handleStartEditPost(post)}
+                        >
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="mission-delete"
+                          disabled={composerBusy || blogActionBusyId === post.id}
+                          onClick={() => handleDeleteBlogPost(post)}
+                          aria-label="Delete post"
+                        >
+                          {blogActionBusyId === post.id ? 'Deleting…' : 'Delete'}
+                        </button>
                       </div>
                     )}
                   </article>

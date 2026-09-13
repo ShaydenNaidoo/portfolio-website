@@ -80,12 +80,16 @@ func (a *App) saveTHMSnapshot(payload map[string]any, source string) error {
 		Source:      source,
 		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
-	if a.mongoStore != nil {
-		return a.mongoStore.UpsertTHMSnapshot(snap)
-	}
 	b, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return err
+	}
+	// Only admin-pasted snapshots are worth a commit; live refreshes are not.
+	if source == "manual" {
+		a.backup(thmSnapshotFile, b, "Update TryHackMe snapshot")
+	}
+	if a.mongoStore != nil {
+		return a.mongoStore.UpsertTHMSnapshot(snap)
 	}
 	return os.WriteFile(thmSnapshotFile, b, 0o644)
 }
@@ -159,6 +163,18 @@ func (a *App) handleAdminTHMSnapshot(w http.ResponseWriter, r *http.Request) {
 		snap, err := a.loadTHMSnapshot()
 		if err != nil {
 			http.Error(w, "failed to load snapshot", http.StatusInternalServerError)
+			return
+		}
+		// ?export=1 returns the stored document itself, in the exact shape
+		// read from data/thm_snapshot.json, so it can be committed as a seed
+		// that survives redeploys even without MongoDB.
+		if r.URL.Query().Get("export") != "" {
+			if snap == nil {
+				http.Error(w, "no snapshot stored", http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Disposition", `attachment; filename="thm_snapshot.json"`)
+			respondJSON(w, snap)
 			return
 		}
 		respondJSON(w, a.thmSnapshotMeta(snap))
@@ -261,13 +277,16 @@ func (a *App) handleAdminTHMSnapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) thmSnapshotMeta(snap *THMSnapshot) map[string]any {
-	storage := "json-file (lost on redeploy — set MONGODB_URI)"
+	storage := "json-file (lost on redeploy — set MONGODB_URI or GIT_BACKUP_REPO)"
 	if a.mongoStore != nil {
 		storage = "mongodb"
+	} else if a.gitBackup != nil {
+		storage = "json-file + git backup"
 	}
 	meta := map[string]any{
 		"hasSnapshot": snap != nil,
 		"storage":     storage,
+		"gitBackup":   a.gitBackupStatus(),
 		"username":    a.thmUser,
 		"endpoints": map[string]string{
 			"profile": "https://tryhackme.com/api/v2/public-profile?username=" + a.thmUser,

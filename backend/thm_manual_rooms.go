@@ -125,6 +125,7 @@ func (a *App) saveTHMManualRoomsFile(rooms []THMManualRoom) error {
 	if err != nil {
 		return err
 	}
+	a.backup(thmManualRoomsFile, b, "Update TryHackMe manual rooms")
 	return os.WriteFile(thmManualRoomsFile, b, 0o644)
 }
 

@@ -747,3 +747,5 @@ body.has-art-home #big-name .ch:not(.box):not(.boxw){
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001s !important;transition-duration:.001s !important;}
 }
+
+.blog-admin-actions{display:flex;gap:10px;align-items:center;justify-content:flex-end;margin-top:12px;}

@@ -9,7 +9,7 @@ services:
     buildCommand: go build -o server .
     startCommand: ./server
     autoDeployTrigger: commit
-    healthCheckPath: /api/profile
+    healthCheckPath: /api/health
     envVars:
       - key: PORT
         value: 10000
@@ -35,6 +35,11 @@ services:
         sync: false
       - key: MONGODB_DATABASE
         value: portfolio
+      # Optional: commit admin edits (blog posts, TryHackMe snapshot/skills/rooms)
+      # back to the repo so they survive redeploys without MongoDB.
+      # Example: ShaydenNaidoo/portfolio-website
+      - key: GIT_BACKUP_REPO
+        sync: false
 
   - type: web
     name: shayden-portfolio-web

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -52,6 +53,48 @@ func (a *App) initMongoStoreFromEnv() {
 		}
 	}
 	fmt.Println("WARNING: MongoDB unavailable; falling back to JSON storage. Blog posts, missions and TryHackMe data saved now will be lost on the next deploy.")
+}
+
+// Ping checks the connection; the driver reconnects on its own, so a failed
+// ping is transient unless the cluster is gone.
+func (m *MongoStore) Ping() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	return m.client.Ping(ctx, readpref.Primary())
+}
+
+// startMongoKeepAlive pings the cluster periodically. Atlas pauses (and
+// eventually deletes) free-tier clusters that see no connections for weeks,
+// so as long as this process is awake the cluster counts as active.
+func (a *App) startMongoKeepAlive() {
+	if a.mongoStore == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := a.mongoStore.Ping(); err != nil {
+				fmt.Printf("MongoDB keep-alive ping failed: %v\n", err)
+			}
+		}
+	}()
+}
+
+// handleHealth is meant for an external uptime monitor. Hitting it keeps the
+// web service awake and touches MongoDB, so both stay active.
+func (a *App) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	out := map[string]any{"ok": true, "storage": a.storageMode(), "time": time.Now().UTC().Format(time.RFC3339)}
+	if a.mongoStore != nil {
+		if err := a.mongoStore.Ping(); err != nil {
+			out["ok"] = false
+			out["mongoError"] = err.Error()
+			w.WriteHeader(http.StatusServiceUnavailable)
+		} else {
+			out["mongo"] = "connected"
+		}
+	}
+	respondJSON(w, out)
 }
 
 // storageMode is reported to the admin UI so it is obvious when writes are
@@ -147,14 +190,23 @@ func (m *MongoStore) LoadBlogPosts() ([]BlogPost, error) {
 	return posts, nil
 }
 
+func (m *MongoStore) DeleteBlogPost(id string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	_, err := m.blogPosts.DeleteOne(ctx, bson.M{"id": id})
+	return err
+}
+
 func (m *MongoStore) UpsertBlogPost(post BlogPost) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	_, err := m.blogPosts.UpdateOne(
+	// Replace rather than $set so a cleared image (omitempty) is actually
+	// removed from the stored document.
+	_, err := m.blogPosts.ReplaceOne(
 		ctx,
 		bson.M{"id": post.ID},
-		bson.M{"$set": post},
-		options.Update().SetUpsert(true),
+		post,
+		options.Replace().SetUpsert(true),
 	)
 	return err
 }
