@@ -51,10 +51,12 @@ type Repo struct {
 }
 
 type Certification struct {
-	Name   string `json:"name"`
-	Issuer string `json:"issuer"`
-	Date   string `json:"date"`
-	URL    string `json:"url"`
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name"`
+	Issuer  string `json:"issuer"`
+	Date    string `json:"date"`
+	URL     string `json:"url"`
+	FileURL string `json:"fileUrl,omitempty"` // uploaded certificate (/api/files/<id> or /api/images/<id>)
 }
 
 type Experience struct {
@@ -82,6 +84,7 @@ type SiteData struct {
 	DisplayName    string          `json:"displayName"`
 	Headline       string          `json:"headline"`
 	Bio            string          `json:"bio"`
+	About          string          `json:"about"` // free-text paragraph under the quote
 	CVURL          string          `json:"cvUrl"`
 	LinkedInURL    string          `json:"linkedinUrl"`
 	Languages      []string        `json:"languages"`
@@ -284,12 +287,17 @@ func main() {
 	mux.HandleFunc("/api/repos", app.handleRepos)
 	mux.HandleFunc("/api/admin/repo/", app.handleRepoUpdate)
 	mux.HandleFunc("/api/images/", app.handleImage)
+	mux.HandleFunc("/api/files/", app.handleImage)
 	mux.HandleFunc("/api/admin/images", app.handleAdminImages)
 	mux.HandleFunc("/api/admin/images/", app.handleAdminImages)
 	mux.HandleFunc("/api/admin/refresh", app.handleRefresh)
 	mux.HandleFunc("/api/admin/login", app.handleAdminLogin)
 	mux.HandleFunc("/api/admin/logout", app.handleAdminLogout)
 	mux.HandleFunc("/api/admin/session", app.handleAdminSession)
+	mux.HandleFunc("/api/admin/about", app.handleAdminAbout)
+	mux.HandleFunc("/api/admin/certifications", app.handleAdminCertifications)
+	mux.HandleFunc("/api/admin/certifications/", app.handleAdminCertifications)
+	mux.HandleFunc("/api/admin/cv", app.handleAdminCV)
 	mux.HandleFunc("/api/admin/blog", app.handleAdminBlogCreate)
 	mux.HandleFunc("/api/admin/blog/", app.handleAdminBlogItem)
 	mux.HandleFunc("/api/admin/mission-control", app.handleAdminMissionControl)
@@ -343,6 +351,22 @@ func (a *App) loadSiteData() {
 	}
 	if a.siteData.BlogPosts == nil {
 		a.siteData.BlogPosts = []BlogPost{}
+	}
+	if a.mongoStore != nil {
+		// Profile fields: Mongo wins once it has a document; otherwise seed
+		// it from the committed JSON so nothing is lost on first boot.
+		if stored, err := a.mongoStore.LoadSiteProfile(); err != nil {
+			fmt.Printf("Mongo profile load failed, using JSON fallback: %v\n", err)
+		} else if stored != nil {
+			posts := a.siteData.BlogPosts
+			a.siteData = *stored
+			a.siteData.BlogPosts = posts
+		} else {
+			_ = a.mongoStore.SaveSiteProfile(a.siteData)
+		}
+	}
+	if ensureCertificationIDs(a.siteData.Certifications) {
+		_ = a.saveSiteDataLocked()
 	}
 	if a.mongoStore != nil {
 		posts, err := a.mongoStore.LoadBlogPosts()
@@ -433,8 +457,16 @@ func (a *App) saveSiteDataLocked() error {
 	if err != nil {
 		return err
 	}
-	a.backup("data/site_data.json", b, "Update site data (blog posts)")
-	return os.WriteFile("data/site_data.json", b, 0o644)
+	a.backup("data/site_data.json", b, "Update site data")
+	if a.mongoStore != nil {
+		if err := a.mongoStore.SaveSiteProfile(a.siteData); err != nil {
+			return err
+		}
+	}
+	if err := os.WriteFile("data/site_data.json", b, 0o644); err != nil && a.mongoStore == nil {
+		return err
+	}
+	return nil
 }
 
 func (a *App) handleProfile(w http.ResponseWriter, _ *http.Request) {

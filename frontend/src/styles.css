@@ -757,3 +757,6 @@ body.has-art-home #big-name .ch:not(.box):not(.boxw){
 .repo-admin{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0 4px;}
 .repo-hidden-tag{font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:var(--red);}
 .card.repo-hidden{filter:grayscale(.85) contrast(.85);outline:3px dashed var(--red);outline-offset:-3px;}
+
+.admin-inline{margin:14px 0 22px;max-width:none;}
+.exp-edit{border-top:2px dashed var(--ink);padding:12px 0 6px;margin-top:8px;}

@@ -1588,6 +1588,226 @@ function App() {
     return new Date(now.getFullYear(), now.getMonth(), 1)
   })
 
+  // About / certifications / CV editing (admin)
+  const [aboutEdit, setAboutEdit] = useState(null)
+  const [aboutBusy, setAboutBusy] = useState(false)
+  const [aboutNotice, setAboutNotice] = useState('')
+  const [certEdit, setCertEdit] = useState(null) // { id, name, issuer, date, url, fileUrl }
+  const [certBusy, setCertBusy] = useState(false)
+  const [certNotice, setCertNotice] = useState('')
+  const [cvBusy, setCvBusy] = useState(false)
+  const [cvNotice, setCvNotice] = useState('')
+
+  const adminFetch = async (path, options = {}) => {
+    const token = String(adminToken || '').trim()
+    if (!token) {
+      throw new Error('Login is required.')
+    }
+    const response = await fetch(`${API}${path}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(options.headers || {}) }
+    })
+    if (!response.ok) {
+      throw new Error(await parseErrorMessage(response, 'Request failed.'))
+    }
+    return response.json()
+  }
+
+  // Reads a PDF as-is (size-capped) or compresses an image, returning a data URL.
+  const readAttachment = async (file) => {
+    if (!file) {
+      throw new Error('Choose a file first.')
+    }
+    if (file.type === 'application/pdf') {
+      if (file.size > 8 * 1024 * 1024) {
+        throw new Error('PDF is too large (max 8MB).')
+      }
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ''))
+        reader.onerror = () => reject(new Error('Could not read the file.'))
+        reader.readAsDataURL(file)
+      })
+    }
+    if (file.type.startsWith('image/')) {
+      return compressImageFile(file, { maxDim: 1600, quality: 0.85 })
+    }
+    throw new Error('Only PDF or image files are allowed.')
+  }
+
+  const handleAboutEditStart = () => {
+    setAboutNotice('')
+    setAboutEdit({
+      displayName: profile?.displayName || '',
+      headline: profile?.headline || '',
+      bio: profile?.bio || '',
+      about: profile?.about || '',
+      languages: (profile?.languages || []).join(', '),
+      experience: (profile?.experience || []).map((exp) => ({
+        role: exp.role || '',
+        company: exp.company || '',
+        dateRange: exp.dateRange || '',
+        description: (exp.description || []).join('\n')
+      }))
+    })
+  }
+
+  const handleAboutSave = async (event) => {
+    event.preventDefault()
+    if (!aboutEdit) {
+      return
+    }
+    setAboutBusy(true)
+    setAboutNotice('')
+    try {
+      const payload = await adminFetch('/api/admin/about', {
+        method: 'PUT',
+        body: JSON.stringify({
+          displayName: aboutEdit.displayName,
+          headline: aboutEdit.headline,
+          bio: aboutEdit.bio,
+          about: aboutEdit.about,
+          languages: aboutEdit.languages.split(/[,\n]+/).map((item) => item.trim()).filter(Boolean),
+          experience: aboutEdit.experience.map((exp) => ({
+            role: exp.role,
+            company: exp.company,
+            dateRange: exp.dateRange,
+            description: exp.description.split('\n').map((line) => line.trim()).filter(Boolean)
+          }))
+        })
+      })
+      setProfile((current) => ({ ...(current || {}), ...(payload.profile || {}), blogPosts: current?.blogPosts || [] }))
+      setAboutEdit(null)
+      setAboutNotice('About section updated.')
+      playSelect()
+    } catch (saveError) {
+      setAboutNotice(saveError.message || 'Could not save.')
+    } finally {
+      setAboutBusy(false)
+    }
+  }
+
+  const updateExperience = (index, field, value) => {
+    setAboutEdit((current) => {
+      if (!current) {
+        return current
+      }
+      const experience = current.experience.map((exp, i) => (i === index ? { ...exp, [field]: value } : exp))
+      return { ...current, experience }
+    })
+  }
+
+  const applyCertifications = (certifications) => {
+    setProfile((current) => ({ ...(current || {}), certifications: Array.isArray(certifications) ? certifications : [] }))
+  }
+
+  const handleCertEditStart = (cert) => {
+    setCertNotice('')
+    setCertEdit({
+      id: cert?.id || '',
+      name: cert?.name || '',
+      issuer: cert?.issuer || '',
+      date: cert?.date || '',
+      url: cert?.url || '',
+      fileUrl: cert?.fileUrl || ''
+    })
+  }
+
+  const handleCertAttachmentUpload = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) {
+      return
+    }
+    setCertBusy(true)
+    setCertNotice('Uploading attachment…')
+    try {
+      const dataUrl = await readAttachment(file)
+      const payload = await adminFetch('/api/admin/images', {
+        method: 'POST',
+        body: JSON.stringify({ imageData: dataUrl, kind: 'certificate' })
+      })
+      setCertEdit((current) => (current ? { ...current, fileUrl: payload.url } : current))
+      setCertNotice(`Attachment ready (${Math.round((payload.size || 0) / 1024)} KB). Save to apply.`)
+    } catch (uploadError) {
+      setCertNotice(uploadError.message || 'Upload failed.')
+    } finally {
+      setCertBusy(false)
+    }
+  }
+
+  const handleCertSave = async (event) => {
+    event.preventDefault()
+    if (!certEdit) {
+      return
+    }
+    setCertBusy(true)
+    setCertNotice('')
+    try {
+      const editing = Boolean(certEdit.id)
+      const payload = await adminFetch(editing ? `/api/admin/certifications/${encodeURIComponent(certEdit.id)}` : '/api/admin/certifications', {
+        method: editing ? 'PUT' : 'POST',
+        body: JSON.stringify({ name: certEdit.name, issuer: certEdit.issuer, date: certEdit.date, url: certEdit.url, fileUrl: certEdit.fileUrl })
+      })
+      applyCertifications(payload.certifications)
+      setCertEdit(null)
+      setCertNotice(editing ? 'Certification updated.' : 'Certification added.')
+      playSelect()
+    } catch (saveError) {
+      setCertNotice(saveError.message || 'Could not save certification.')
+    } finally {
+      setCertBusy(false)
+    }
+  }
+
+  const handleCertDelete = async (cert) => {
+    if (!window.confirm(`Delete “${cert.name}”? Its attachment will be removed too.`)) {
+      return
+    }
+    setCertBusy(true)
+    setCertNotice('')
+    try {
+      const payload = await adminFetch(`/api/admin/certifications/${encodeURIComponent(cert.id)}`, { method: 'DELETE' })
+      applyCertifications(payload.certifications)
+      if (certEdit?.id === cert.id) {
+        setCertEdit(null)
+      }
+      setCertNotice('Certification deleted.')
+    } catch (deleteError) {
+      setCertNotice(deleteError.message || 'Could not delete certification.')
+    } finally {
+      setCertBusy(false)
+    }
+  }
+
+  const handleCVUpload = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) {
+      return
+    }
+    if (file.type !== 'application/pdf') {
+      setCvNotice('The CV must be a PDF.')
+      return
+    }
+    if (!window.confirm('Replace the current CV? The old file will be deleted.')) {
+      return
+    }
+    setCvBusy(true)
+    setCvNotice('Uploading…')
+    try {
+      const dataUrl = await readAttachment(file)
+      const payload = await adminFetch('/api/admin/cv', { method: 'POST', body: JSON.stringify({ fileData: dataUrl }) })
+      setProfile((current) => ({ ...(current || {}), cvUrl: payload.cvUrl }))
+      setCvNotice(`CV replaced (${Math.round((payload.size || 0) / 1024)} KB).`)
+      playSelect()
+    } catch (uploadError) {
+      setCvNotice(uploadError.message || 'Upload failed.')
+    } finally {
+      setCvBusy(false)
+    }
+  }
+
   const [repoEdit, setRepoEdit] = useState(null) // { name, title, description, languages }
   const [repoBusy, setRepoBusy] = useState(false)
   const [repoNotice, setRepoNotice] = useState('')
@@ -2771,6 +2991,9 @@ function App() {
   }, [thmResponse])
 
   const displayName = profile?.displayName || 'Shayden Naidoo'
+  // An uploaded CV lives at /api/files/<id>; anything else falls back to the bundled PDF.
+  const cvHref = String(profile?.cvUrl || '').startsWith('/api/') ? `${API}${profile.cvUrl}?name=Shayden_Naidoo_CV` : CV_PDF
+  const aboutText = String(profile?.about || '').trim()
   const nameParts = displayName.toUpperCase().split(/\s+/).filter(Boolean)
   const headline = profile?.headline || 'Cybersecurity & Software Engineering'
   const bio = profile?.bio || 'Portfolio profile loading.'
@@ -3076,9 +3299,16 @@ function App() {
                 <em>{headline}</em> — {bio}
               </p>
               <br />
+              {aboutText ? (
+                aboutText.split(/\n{2,}/).map((para, idx) => <p key={`about-${idx}`}>{para}</p>)
+              ) : (
+                <p>
+                  I'm a Computer Science student at the <span className="stamp">University of Pretoria</span>,
+                  focused on offensive security and full-stack engineering.
+                </p>
+              )}
               <p>
-                I'm a Computer Science student at the <span className="stamp">University of Pretoria</span>,
-                focused on offensive security and full-stack engineering. You can explore my repositories at{' '}
+                You can explore my repositories at{' '}
                 <a href={githubUrl} target="_blank" rel="noreferrer">{githubUrl.replace(/^https?:\/\//, '')}</a>
                 {thmProfileUrl && (
                   <>
@@ -3087,6 +3317,61 @@ function App() {
                   </>
                 )}.
               </p>
+
+              {isAdminAuthenticated && !aboutEdit && (
+                <div className="form-foot" style={{ margin: '12px 0 18px' }}>
+                  <button type="button" className="cv-btn small" onClick={handleAboutEditStart}><span>Edit about ✎</span></button>
+                  {aboutNotice && <div className="form-status" role="status">{aboutNotice}</div>}
+                </div>
+              )}
+              {isAdminAuthenticated && aboutEdit && (
+                <form className="paper admin-inline" onSubmit={handleAboutSave}>
+                  <div className="form-head">Edit about</div>
+                  <div className="field-row">
+                    <label className="field"><span>Display name</span>
+                      <input type="text" maxLength={80} value={aboutEdit.displayName} onChange={(e) => setAboutEdit((c) => ({ ...c, displayName: e.target.value }))} />
+                    </label>
+                    <label className="field"><span>Headline</span>
+                      <input type="text" maxLength={160} value={aboutEdit.headline} onChange={(e) => setAboutEdit((c) => ({ ...c, headline: e.target.value }))} />
+                    </label>
+                  </div>
+                  <label className="field"><span>Bio (one line, shown after the headline)</span>
+                    <textarea rows={2} maxLength={600} value={aboutEdit.bio} onChange={(e) => setAboutEdit((c) => ({ ...c, bio: e.target.value }))} />
+                  </label>
+                  <label className="field"><span>About paragraph(s) — blank line between paragraphs</span>
+                    <textarea rows={5} maxLength={4000} value={aboutEdit.about} onChange={(e) => setAboutEdit((c) => ({ ...c, about: e.target.value }))} />
+                  </label>
+                  <label className="field"><span>Languages (comma separated, shown on Skills)</span>
+                    <input type="text" value={aboutEdit.languages} onChange={(e) => setAboutEdit((c) => ({ ...c, languages: e.target.value }))} />
+                  </label>
+                  <div className="form-head" style={{ marginTop: 18 }}>Experience</div>
+                  {aboutEdit.experience.map((exp, index) => (
+                    <div key={`exp-edit-${index}`} className="exp-edit">
+                      <div className="field-row">
+                        <label className="field"><span>Role</span>
+                          <input type="text" maxLength={160} value={exp.role} onChange={(e) => updateExperience(index, 'role', e.target.value)} />
+                        </label>
+                        <label className="field"><span>Company</span>
+                          <input type="text" maxLength={160} value={exp.company} onChange={(e) => updateExperience(index, 'company', e.target.value)} />
+                        </label>
+                        <label className="field"><span>Dates</span>
+                          <input type="text" maxLength={80} value={exp.dateRange} onChange={(e) => updateExperience(index, 'dateRange', e.target.value)} />
+                        </label>
+                      </div>
+                      <label className="field"><span>Bullet points (one per line)</span>
+                        <textarea rows={3} value={exp.description} onChange={(e) => updateExperience(index, 'description', e.target.value)} />
+                      </label>
+                      <button type="button" className="mission-delete" onClick={() => setAboutEdit((c) => ({ ...c, experience: c.experience.filter((_, i) => i !== index) }))}>Remove entry</button>
+                    </div>
+                  ))}
+                  <div className="form-foot">
+                    <button type="button" className="cv-btn small" onClick={() => setAboutEdit((c) => ({ ...c, experience: [...c.experience, { role: '', company: '', dateRange: '', description: '' }] }))}><span>+ Add experience</span></button>
+                    <button type="submit" className="cv-btn small" disabled={aboutBusy}><span>{aboutBusy ? 'Saving…' : 'Save about ➤'}</span></button>
+                    <button type="button" className="cv-btn small" disabled={aboutBusy} onClick={() => setAboutEdit(null)}><span>Cancel</span></button>
+                    {aboutNotice && <div className="form-status" role="status">{aboutNotice}</div>}
+                  </div>
+                </form>
+              )}
 
               {experiences.length > 0 && <h3>Experience</h3>}
               {experiences.map((exp) => (
@@ -3101,16 +3386,74 @@ function App() {
                 </div>
               ))}
 
-              {certifications.length > 0 && <h3>Certifications</h3>}
-              {certifications.map((cert) => (
-                <div key={`${cert.name}-${cert.date}`} className="exp">
-                  <div className="exp-role"><a href={cert.url} target="_blank" rel="noreferrer">{cert.name}</a></div>
-                  <div className="exp-co">{cert.issuer} · {cert.date}</div>
+              {(certifications.length > 0 || isAdminAuthenticated) && <h3>Certifications</h3>}
+              {certifications.map((cert, index) => (
+                <div key={cert.id || `${cert.name}-${cert.date}-${index}`} className="exp">
+                  <div className="exp-role">
+                    {cert.url ? <a href={cert.url} target="_blank" rel="noreferrer">{cert.name}</a> : cert.name}
+                  </div>
+                  <div className="exp-co">
+                    {[cert.issuer, cert.date].filter(Boolean).join(' · ')}
+                    {cert.fileUrl && (
+                      <>
+                        {' · '}
+                        <a href={`${resolveImageUrl(cert.fileUrl)}?name=${encodeURIComponent(cert.name)}`} target="_blank" rel="noreferrer">View certificate ↗</a>
+                      </>
+                    )}
+                  </div>
+                  {isAdminAuthenticated && (
+                    <div className="repo-admin">
+                      <button type="button" className="cv-btn small" disabled={certBusy} onClick={() => handleCertEditStart(cert)}><span>Edit</span></button>
+                      <button type="button" className="mission-delete" disabled={certBusy} onClick={() => handleCertDelete(cert)}>Delete</button>
+                    </div>
+                  )}
                 </div>
               ))}
+              {isAdminAuthenticated && !certEdit && (
+                <div className="form-foot" style={{ margin: '12px 0 0' }}>
+                  <button type="button" className="cv-btn small" onClick={() => handleCertEditStart(null)}><span>+ Add certification</span></button>
+                  {certNotice && <div className="form-status" role="status">{certNotice}</div>}
+                </div>
+              )}
+              {isAdminAuthenticated && certEdit && (
+                <form className="paper admin-inline" onSubmit={handleCertSave}>
+                  <div className="form-head">{certEdit.id ? 'Edit certification' : 'Add certification'}</div>
+                  <div className="field-row">
+                    <label className="field"><span>Name</span>
+                      <input type="text" maxLength={160} required value={certEdit.name} onChange={(e) => setCertEdit((c) => ({ ...c, name: e.target.value }))} />
+                    </label>
+                    <label className="field"><span>Issuer</span>
+                      <input type="text" maxLength={160} value={certEdit.issuer} onChange={(e) => setCertEdit((c) => ({ ...c, issuer: e.target.value }))} />
+                    </label>
+                    <label className="field"><span>Date</span>
+                      <input type="text" maxLength={40} placeholder="2026" value={certEdit.date} onChange={(e) => setCertEdit((c) => ({ ...c, date: e.target.value }))} />
+                    </label>
+                  </div>
+                  <label className="field"><span>Verification link (optional, https://…)</span>
+                    <input type="url" value={certEdit.url} onChange={(e) => setCertEdit((c) => ({ ...c, url: e.target.value }))} />
+                  </label>
+                  <p className="mission-meta" style={{ margin: '6px 0 0' }}>
+                    {certEdit.fileUrl
+                      ? <>Attachment: <a href={resolveImageUrl(certEdit.fileUrl)} target="_blank" rel="noreferrer">preview ↗</a></>
+                      : 'No attachment. Upload the certificate as PDF or image (optional).'}
+                  </p>
+                  <div className="form-foot">
+                    <label className="upload-btn">
+                      <input type="file" accept="application/pdf,image/*" onChange={handleCertAttachmentUpload} disabled={certBusy} />
+                      Upload certificate
+                    </label>
+                    {certEdit.fileUrl && (
+                      <button type="button" className="cv-btn small" disabled={certBusy} onClick={() => setCertEdit((c) => ({ ...c, fileUrl: '' }))}><span>Remove attachment</span></button>
+                    )}
+                    <button type="submit" className="cv-btn small" disabled={certBusy}><span>{certBusy ? 'Saving…' : 'Save ➤'}</span></button>
+                    <button type="button" className="cv-btn small" disabled={certBusy} onClick={() => setCertEdit(null)}><span>Cancel</span></button>
+                    {certNotice && <div className="form-status" role="status">{certNotice}</div>}
+                  </div>
+                </form>
+              )}
             </div>
             <div className="btn-row">
-              <a className="cv-btn" href={CV_PDF} download="Shayden_Naidoo_CV.pdf"><span>⬇ Download my CV (PDF)</span></a>
+              <a className="cv-btn" href={cvHref} download="Shayden_Naidoo_CV.pdf"><span>⬇ Download my CV (PDF)</span></a>
               <button type="button" className="cv-btn small" onClick={() => goTo('cv')}><span>View CV →</span></button>
             </div>
           </section>
@@ -3120,12 +3463,19 @@ function App() {
             <div className="screen-head"><Ransom text="CV" /></div>
             <button type="button" className="back-hint" onClick={() => goTo('home')}>ESC · Back</button>
             <div className="cv-frame">
-              {route === 'cv' && <iframe title={`${displayName} CV`} src={CV_PDF} />}
+              {route === 'cv' && <iframe title={`${displayName} CV`} src={cvHref} />}
             </div>
             <div className="btn-row">
-              <a className="cv-btn" href={CV_PDF} download="Shayden_Naidoo_CV.pdf"><span>⬇ Download (PDF)</span></a>
-              <a className="cv-btn small" href={CV_PDF} target="_blank" rel="noreferrer"><span>Open in new tab ↗</span></a>
+              <a className="cv-btn" href={cvHref} download="Shayden_Naidoo_CV.pdf"><span>⬇ Download (PDF)</span></a>
+              <a className="cv-btn small" href={cvHref} target="_blank" rel="noreferrer"><span>Open in new tab ↗</span></a>
+              {isAdminAuthenticated && (
+                <label className="upload-btn">
+                  <input type="file" accept="application/pdf" onChange={handleCVUpload} disabled={cvBusy} />
+                  {cvBusy ? 'Uploading…' : 'Replace CV (PDF)'}
+                </label>
+              )}
             </div>
+            {isAdminAuthenticated && cvNotice && <div className="form-status" role="status" style={{ marginTop: 10 }}>{cvNotice}</div>}
           </section>
 
           {/* BLOG */}
@@ -3306,7 +3656,7 @@ function App() {
               <a className="contact-chip" href={githubUrl} target="_blank" rel="noreferrer"><span>GitHub ↗</span></a>
               {thmProfileUrl && <a className="contact-chip" href={thmProfileUrl} target="_blank" rel="noreferrer"><span>TryHackMe ↗</span></a>}
               {CONTACT_EMAIL && <a className="contact-chip" href={`mailto:${CONTACT_EMAIL}`}><span>Email ✉</span></a>}
-              <a className="contact-chip" href={CV_PDF} download="Shayden_Naidoo_CV.pdf"><span>CV ⬇</span></a>
+              <a className="contact-chip" href={cvHref} download="Shayden_Naidoo_CV.pdf"><span>CV ⬇</span></a>
             </div>
 
             {CONTACT_EMAIL && (

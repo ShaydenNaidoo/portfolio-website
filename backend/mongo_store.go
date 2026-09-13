@@ -26,6 +26,7 @@ type MongoStore struct {
 	thmSkillCategories *mongo.Collection
 	repoOverrides      *mongo.Collection
 	images             *mongo.Collection
+	siteProfile        *mongo.Collection
 }
 
 // Repo overrides are one small document keyed "current": the whole map as
@@ -178,6 +179,7 @@ func newMongoStore(uri string, databaseName string) (*MongoStore, error) {
 		thmSkillCategories: database.Collection("thm_skill_categories"),
 		repoOverrides:      database.Collection("repo_overrides"),
 		images:             database.Collection("images"),
+		siteProfile:        database.Collection("site_profile"),
 	}
 
 	if err := store.ensureIndexes(ctx); err != nil {
