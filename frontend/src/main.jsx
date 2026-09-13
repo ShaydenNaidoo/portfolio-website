@@ -840,6 +840,10 @@ function SkillRadar({ skills }) {
     return toPoint(index, ratio)
   })
 
+  if (axisCount < 3) {
+    return <p className="thm-sync">Add at least 3 skills to draw the radar.</p>
+  }
+
   return (
     <svg viewBox="-70 -14 560 448" aria-label="TryHackMe skills radar chart" role="img" className="thm-radar-svg">
       {Array.from({ length: rings }, (_, ringIndex) => ringIndex + 1).map((ring) => (

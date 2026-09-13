@@ -166,8 +166,8 @@ func (a *App) handleAdminTHMSkillCategories(w http.ResponseWriter, r *http.Reque
 			http.Error(w, "unknown skill category", http.StatusNotFound)
 			return
 		}
-		if len(categories) <= 3 {
-			http.Error(w, "keep at least 3 skills so the radar has a shape", http.StatusBadRequest)
+		if len(categories) <= 1 {
+			http.Error(w, "keep at least one skill in the matrix", http.StatusBadRequest)
 			return
 		}
 		kept := categories[:0]

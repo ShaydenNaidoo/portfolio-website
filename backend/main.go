@@ -125,6 +125,7 @@ type App struct {
 	adminUsername     string
 	adminPasswordHash string
 	adminSessions     map[string]time.Time
+	loginLimiter      *loginLimiter
 	thmCacheBody      []byte
 	thmCacheExpiresAt time.Time
 }
@@ -170,6 +171,7 @@ func main() {
 		adminUsername:     adminUser,
 		adminPasswordHash: adminHash,
 		adminSessions:     map[string]time.Time{},
+		loginLimiter:      newLoginLimiter(),
 	}
 	if app.githubUser == "" {
 		app.githubUser = "octocat"
@@ -363,8 +365,15 @@ func (a *App) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := clientIP(r)
+	if retryAfter := a.loginLimiter.blockedFor(ip, time.Now()); retryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+		http.Error(w, "too many login attempts; try again later", http.StatusTooManyRequests)
+		return
+	}
+
 	var in AdminLoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
@@ -376,10 +385,16 @@ func (a *App) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if username != a.adminUsername || !verifyPBKDF2Password(password, a.adminPasswordHash) {
+	// Verify the password even when the username is wrong so both failures
+	// take the same time.
+	passwordOK := verifyPBKDF2Password(password, a.adminPasswordHash)
+	usernameOK := subtle.ConstantTimeCompare([]byte(username), []byte(a.adminUsername)) == 1
+	if !usernameOK || !passwordOK {
+		a.loginLimiter.recordFailure(ip, time.Now())
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
+	a.loginLimiter.reset(ip)
 
 	token, err := newSessionToken()
 	if err != nil {
@@ -694,8 +709,10 @@ func (a *App) handleTHM(w http.ResponseWriter, _ *http.Request) {
 		payload["completedRoomsError"] = shortTHMError(roomsErr)
 	}
 
-	// Everything that came back live is worth keeping for next time.
-	if profileErr == nil {
+	// Everything that came back live is worth keeping for next time, unless
+	// the admin pasted a manual snapshot: that one carries the full skills and
+	// room data the public endpoint lacks, so a live profile must not replace it.
+	if profileErr == nil && (snapshot == nil || snapshot.Source != "manual") {
 		_ = a.saveTHMSnapshot(payload, "live")
 	}
 	a.applyTHMCustomization(payload)
