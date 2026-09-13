@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/hmac"
 	"crypto/rand"
@@ -140,6 +141,25 @@ type App struct {
 }
 
 func main() {
+	// `./server -hash-password` prints a value for ADMIN_PASSWORD_HASH and exits.
+	if len(os.Args) > 1 && os.Args[1] == "-hash-password" {
+		password := ""
+		if len(os.Args) > 2 {
+			password = os.Args[2]
+		} else {
+			fmt.Fprint(os.Stderr, "Password: ")
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			password = strings.TrimSpace(line)
+		}
+		hash, err := newPBKDF2PasswordHash(password)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(hash)
+		return
+	}
+
 	role := os.Getenv("THM_SKILLS_ROLE")
 	if role == "" {
 		role = "Foundational"
